@@ -1,0 +1,10 @@
+Environment: Linux; no swift, xcodebuild or Apple SDK available.
+
+PASS: parsed Xcode project; 50 objects; 2 targets; source membership, local package, embed phase, plists, entitlements, privacy manifests and scheme references.
+LIMIT: structural checks only. Swift tests, type checking, Xcode build, signing and device behavior have NOT been verified.
+
+Shell scripts: bash -n passed.
+check-macos.sh: exited 1 as expected: Required: macOS, Xcode selected with xcode-select, Swift and iOS Simulator SDK.
+XCTest: NOT RUN.
+Xcode build / archive: NOT RUN.
+Physical device / simulator / SideStore: NOT RUN.
