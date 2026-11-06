@@ -2,6 +2,12 @@ name: Build iOS keyboard
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - GlassType-1.1-update.zip
+      - .github/workflows/build-ios.yml
 
 permissions:
   contents: read
