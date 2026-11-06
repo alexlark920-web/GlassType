@@ -41,10 +41,14 @@ public struct InputState {
     }
     public mutating func synchronize(context: String?, autoCapitalization: Bool) {
         guard shift != .locked, autoCapitalization, let context else { return }
-        if context.isEmpty || context.hasSuffix("
-") || [". ", "! ", "? "].contains(where: context.hasSuffix) { shift = .once }
+
+        if context.isEmpty || context.hasSuffix("\n") ||
+            [". ", "! ", "? "].contains(where: { context.hasSuffix($0) }) {
+            shift = .once
+        }
     }
 }
+
 public protocol SuggestionProvider {
     func suggestions(context: String, language: KeyboardLanguage) -> [String]
 }
