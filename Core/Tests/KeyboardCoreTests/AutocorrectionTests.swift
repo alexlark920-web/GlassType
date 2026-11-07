@@ -151,6 +151,7 @@ final class AutocorrectionTests: XCTestCase {
     }
     func testUndoRequiresSameCursorDocumentAndSelection() {
         let undo = CorrectionUndo(original: "helo", replacement: "hello", delimiter: " ", before: "say hello ", after: "tail", document: "A")
+        XCTAssertEqual(undo.contextBeforeReplacement(), "say")
         XCTAssertTrue(undo.matches(before: "say hello ", after: "tail", document: "A", hasSelection: false))
         XCTAssertFalse(undo.matches(before: "say hello ", after: "tail", document: "B", hasSelection: false))
         XCTAssertFalse(undo.matches(before: "say hello ", after: "tail", document: "A", hasSelection: true))
@@ -160,6 +161,7 @@ final class AutocorrectionTests: XCTestCase {
     }
     func testUndoSupportsUnicodeAndUnavailableTrailingContext() {
         let undo = CorrectionUndo(original: "првиет", replacement: "привет", delimiter: ".", before: "👨‍👩‍👧‍👦 привет.", after: nil, document: "A")
+        XCTAssertEqual(undo.contextBeforeReplacement(), "👨‍👩‍👧‍👦 ")
         XCTAssertTrue(undo.matches(before: "👨‍👩‍👧‍👦 привет.", after: nil, document: "A", hasSelection: false))
         XCTAssertFalse(undo.matches(before: "👨‍👩‍👧‍👦 привет. ещё", after: nil, document: "A", hasSelection: false))
     }

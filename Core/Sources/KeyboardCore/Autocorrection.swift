@@ -211,4 +211,12 @@ public struct CorrectionUndo {
         return String(before.suffix(192)) == self.before &&
             after.map({ String($0.prefix(32)) }) == self.after && before.hasSuffix(replacement + delimiter)
     }
+
+    /// Returns the bounded context immediately before the replaced word, when
+    /// this snapshot actually ends with the recorded replacement and delimiter.
+    public func contextBeforeReplacement() -> String? {
+        let suffix = replacement + delimiter
+        guard before.hasSuffix(suffix) else { return nil }
+        return String(before.dropLast(suffix.count))
+    }
 }

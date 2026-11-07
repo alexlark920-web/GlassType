@@ -1850,7 +1850,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         guard glideWords.indices.contains(index), let undo = glideUndo, undoMatches(undo) else { glideWords = []; glideUndo = nil; updateContext(); return }
         let word = glideWords[index]
         let prefix = completedWord?.insertedText.hasPrefix(" ") == true ? " " : ""
-        let previousContext = String((undo.before ?? "").dropLast((undo.replacement + undo.delimiter).count))
+        let previousContext = undo.contextBeforeReplacement() ?? ""
         for _ in (undo.replacement + " ") { textDocumentProxy.deleteBackward() }
         textDocumentProxy.insertText(word + " ")
         learnWord(word, after: previousContext, language: state.language)
