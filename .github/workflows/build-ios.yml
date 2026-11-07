@@ -6,7 +6,15 @@ on:
     branches:
       - main
     paths:
-      - GlassType-1.1-update.zip
+      - App/**
+      - Keyboard/**
+      - Shared/**
+      - Core/**
+      - GlassType.xcodeproj/**
+      - Docs/**
+      - Scripts/**
+      - README.md
+      - LICENSE
       - .github/workflows/build-ios.yml
 
 permissions:
@@ -23,9 +31,6 @@ jobs:
       - name: Download project
         uses: actions/checkout@v4
 
-      - name: Apply update
-        run: unzip -o GlassType-1.1-update.zip
-
       - name: Show Xcode version
         run: |
           ls -d /Applications/Xcode*.app
@@ -41,6 +46,20 @@ jobs:
       - name: Build unsigned IPA
         run: bash Scripts/make-unsigned-ipa.sh
 
+      - name: Read product version
+        id: release
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import plistlib
+          with open("App/Info.plist", "rb") as source:
+              info = plistlib.load(source)
+          print(f"version={info['CFBundleShortVersionString']}")
+          print(f"build={info['CFBundleVersion']}")
+          PY
+
+      - name: Package versioned sources
+        run: python3 Scripts/package_source.py
+
       - name: Save IPA for download
         uses: actions/upload-artifact@v4
         with:
@@ -48,3 +67,11 @@ jobs:
           path: build/GlassType-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
+
+      - name: Save versioned sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: GlassType-source-v${{ steps.release.outputs.version }}-build${{ steps.release.outputs.build }}
+          path: build/GlassType-source-v${{ steps.release.outputs.version }}-build${{ steps.release.outputs.build }}.zip
+          if-no-files-found: error
+          retention-days: 30

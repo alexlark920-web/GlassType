@@ -113,7 +113,7 @@ glide; он не подменяет CharacterLanguagePrior в распознав
 
 Ресурсы CC BY-SA 4.0, атрибуция/полные лицензии включены в SPM bundle; код MIT.
 Scripts/build_lexicons.py воспроизводит фильтрацию из источников с проверкой
-Git blob hashes. Scripts/package_update.py включает ресурсы и новые файлы проекта.
+Git blob hashes. `Scripts/package_source.py` автоматически создаёт версионированный ZIP исходников из канонических файлов репозитория.
 При сборке IPA проверяется наличие трёх словарей непосредственно в расширении.
 
 ## Изменённые файлы
@@ -130,7 +130,7 @@ Git blob hashes. Scripts/package_update.py включает ресурсы и н
   TouchAdaptationTests.swift, OfflineLexiconTests.swift; GlideDecoderTests.swift.
 * GlassType.xcodeproj/project.pbxproj, App/Info.plist, Keyboard/Info.plist —
   включение UIKit-файлов и версия 1.6.
-* Scripts/build_lexicons.py, package_update.py, make-unsigned-ipa.sh,
+* Scripts/build_lexicons.py, package_source.py, make-unsigned-ipa.sh,
   validate_project.py; .github/workflows/build-ios.yml; README/Docs.
 
 Фактическая проверка 1.6 build 13: Xcode 26.3, SDK 26.2, 124 теста без ошибок,

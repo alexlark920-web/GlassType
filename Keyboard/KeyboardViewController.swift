@@ -412,28 +412,6 @@ private final class DeleteKeyButton: KeyButton {
     deinit { delay?.invalidate() }
 }
 
-/// UIKit adapter uses the device's local dictionary, without learning words.
-private final class SystemSpelling {
-    private let checker = UITextChecker()
-    func check(_ word: String, language: KeyboardLanguage) -> (known: Bool, candidates: [String]) {
-        let available = UITextChecker.availableLanguages
-        let preferred: String
-        switch language {
-        case .english: preferred = "en_US"
-        case .russian: preferred = "ru_RU"
-        case .ukrainian: preferred = "uk_UA"
-        }
-        guard let code = available.first(where: { $0 == preferred }) ?? available.first(where: {
-            $0.replacingOccurrences(of: "_", with: "-").lowercased().hasPrefix(language.rawValue + "-") || $0 == language.rawValue
-        }) else { return (false, []) }
-        let text = word.lowercased()
-        let range = NSRange(location: 0, length: (text as NSString).length)
-        let misspelled = checker.rangeOfMisspelledWord(in: text, range: range, startingAt: 0, wrap: false, language: code)
-        if misspelled.location == NSNotFound { return (true, []) }
-        return (false, Array((checker.guesses(forWordRange: range, in: text, language: code) ?? []).prefix(8)))
-    }
-}
-
 final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDelegate {
     private var state = InputState()
     private let theme = KeyboardTheme.material
@@ -450,7 +428,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let language: KeyboardLanguage
     }
     private enum DeferredInput {
-        case text(String), backspace(Bool), deleteWord, shift, symbols, language(LanguageDirection), glide(GlideRequest), suggestion(String, String)
+        case text(String), backspace(Bool), deleteWord, shift, symbols, emoji, language(LanguageDirection), glide(GlideRequest), suggestion(String, String)
     }
     private var pendingInput = PendingInputSequence<DeferredInput>()
     private var drainingInput = false
@@ -458,6 +436,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var trailTimer: Timer?
     private let suggestions = UIStackView()
     private let toolbar = UIStackView()
+    private let pasteTarget = KeyboardPasteTarget()
+    private weak var pasteControl: UIPasteControl?
     private var feedback: UIImpactFeedbackGenerator?
     private var settingsPanel: UIView?
     private var languageSwitches: [KeyboardLanguage: UISwitch] = [:]
@@ -489,8 +469,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var pendingPrefix: String?
     private var suggestionWords: [String] = []
     private var suggestionSignature: String?
-    private let correctionEngine = AutocorrectionEngine()
-    private lazy var spelling = SystemSpelling()
+    private let textService = KeyboardTextService()
     private var correctionUndo: CorrectionUndo?
     private var suppressedCorrection: String?
     private var deletionUndo: TextDeletionUndo?
@@ -590,12 +569,17 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             symbolsButton?.titleLabel?.font = .systemFont(ofSize: keyFontSize() * 0.765)
         }
     }
-    override func textDidChange(_ textInput: UITextInput?) { invalidatePendingInput(); cancelCursorIfDocumentChanged(); invalidateSpaceSnapshot(); invalidateCorrectionUndo(); updateContext() }
+    override func textDidChange(_ textInput: UITextInput?) {
+        invalidatePendingInput(); cancelCursorIfDocumentChanged(); invalidateSpaceSnapshot(); invalidateCorrectionUndo()
+        pasteControl?.isHidden = textDocumentProxy.isSecureTextEntry == true
+        updateContext()
+    }
     override func selectionDidChange(_ textInput: UITextInput?) { invalidatePendingInput(); cancelCursorIfDocumentChanged(); invalidateSpaceSnapshot(); dismissPopup(); invalidateCorrectionUndo(); updateContext() }
     private func reloadSettings() {
         settings = KeyboardSettings.loadKeyboard(fullAccess: hasFullAccess)
         configureFeedback()
         state.language = KeyboardSettings.lastUsedLanguage(enabled: settings.languages)
+        state.emoji = false
         KeyboardSettings.rememberLanguage(state.language)
         switch settings.theme {
         case .system: overrideUserInterfaceStyle = .unspecified
@@ -618,11 +602,22 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         suggestions.axis = .horizontal; suggestions.distribution = .fillEqually; suggestions.spacing = 6
         toolbar.axis = .horizontal; toolbar.spacing = 6
         toolbar.addArrangedSubview(suggestions)
+        let pasteControl = UIPasteControl()
+        pasteControl.target = pasteTarget
+        pasteControl.isHidden = textDocumentProxy.isSecureTextEntry == true
+        self.pasteControl = pasteControl
+        pasteControl.accessibilityLabel = localized("Вставить из буфера обмена")
+        pasteControl.heightAnchor.constraint(greaterThanOrEqualToConstant: 32).isActive = true
+        pasteControl.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        pasteTarget.didRequestPaste = { [weak self] provider in self?.paste(provider) }
+        toolbar.addArrangedSubview(pasteControl)
         if needsToolbar { rows.addArrangedSubview(toolbar) }
         if lexiconEditing != nil { configureEditorBar() }
         for button in keyPlane.keyViews { button.removeFromSuperview() }
         keyPlane.keyViews.removeAll(keepingCapacity: true)
         keyPlane.language = state.language; keyPlane.symbolPage = state.symbols ? state.symbolPage : nil
+        keyPlane.customRows = state.emoji ? KeyboardLayout.emojiRows : nil
+        keyPlane.thirdRowUsesModeSwitch = state.emoji
         keyPlane.compact = settings.compactKeys; keyPlane.needsSystemKey = needsInputModeSwitchKey
         keyPlane.showsDebugZones = settings.debugTouchZones
         func attach(_ button: UIButton) {
@@ -632,30 +627,32 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             }
             keyPlane.keyViews.append(button); keyPlane.addKey(button)
         }
-        let keyRows = state.symbols ? state.symbolPage.rows : state.language.rows
+        let keyRows = state.emoji ? KeyboardLayout.emojiRows : (state.symbols ? state.symbolPage.rows : state.language.rows)
         for (index, keys) in keyRows.enumerated() {
             if index == 2 {
-                let shift = makeButton(state.symbols ? state.symbolPage.switchTitle : "⇧", special: true)
-                shift.accessibilityLabel = state.symbols ? "Другая страница символов" : "Shift — двойное нажатие: Caps Lock"
-                shift.addTarget(self, action: #selector(shiftTapped), for: .touchUpInside)
-                shiftButton = shift; attach(shift)
+                let title = state.emoji ? "ABC" : (state.symbols ? state.symbolPage.switchTitle : "⇧")
+                let leading = makeButton(title, special: true)
+                leading.accessibilityLabel = state.emoji ? localized("Сменить на буквы") : (state.symbols ? localized("Другая страница символов") : localized("Shift — двойное нажатие: Caps Lock"))
+                if state.emoji { leading.addAction(UIAction { [weak self] _ in self?.leaveEmojiKeyboard() }, for: .touchUpInside) }
+                else { leading.addTarget(self, action: #selector(shiftTapped), for: .touchUpInside) }
+                shiftButton = leading; attach(leading)
             }
             for key in keys {
                 let button = makeButton(key)
                 button.accessibilityLabel = key
                 configureTextAction(button, text: key)
-                let alternatives = state.symbols ? state.language.alternatives(for: key) : state.language.holdAlternatives(for: key, symbolsEnabled: settings.extraSymbols)
+                let alternatives = state.emoji ? [] : (state.symbols ? state.language.alternatives(for: key) : state.language.holdAlternatives(for: key, symbolsEnabled: settings.extraSymbols))
                 configureHold(on: button, alternatives: alternatives)
                 letterButtons.append((button, key)); attach(button)
             }
             if index == 2 {
-                let delete = makeButton("⌫", special: true); delete.accessibilityLabel = "Удалить"
+                let delete = makeButton("⌫", special: true); delete.accessibilityLabel = localized("Удалить")
                 deleteButton = delete as? DeleteKeyButton
                 deleteButton?.deleteAction = { [weak self] in self?.deleteOnce() }
                 deleteButton?.repeatDeleteAction = { [weak self] in self?.deleteOnce(allowGlideWord: false) }
                 deleteButton?.deleteWordAction = { [weak self] in self?.deleteWord() }
                 deleteButton?.canSwipeWord = { [weak self] in self?.settings.swipeDeleteWord == true && self?.lexiconEditing == nil }
-                delete.accessibilityCustomActions = [UIAccessibilityCustomAction(name: "Удалить слово") { [weak self] _ in self?.deleteWord(); return true }]
+                delete.accessibilityCustomActions = [UIAccessibilityCustomAction(name: localized("Удалить слово")) { [weak self] _ in self?.deleteWord(); return true }]
                 attach(delete)
             }
         }
@@ -667,18 +664,23 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         attach(symbols)
         let language = makeButton("", special: true)
         languageButton = language as? KeyButton
-        language.setImage(UIImage(systemName: "globe", withConfiguration: UIImage.SymbolConfiguration(pointSize: 21, weight: .regular)), for: .normal)
+        let languageSymbol = settings.emojiKeyEnabled ? "face.smiling" : "globe"
+        language.setImage(UIImage(systemName: languageSymbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: settings.emojiKeyEnabled ? 19 : 21, weight: .regular)), for: .normal)
         language.tintColor = theme.foreground
-        language.accessibilityLabel = "Сменить язык"; language.accessibilityValue = state.language.title
-        language.accessibilityHint = "Удерживайте для настроек клавиатуры"
-        language.addAction(UIAction { [weak self] _ in self?.cycleLanguage(.next) }, for: .touchUpInside)
+        language.accessibilityLabel = localized(settings.emojiKeyEnabled ? "Эмодзи" : "Сменить язык")
+        language.accessibilityValue = settings.emojiKeyEnabled ? nil : state.language.title
+        language.accessibilityHint = localized("Удерживайте для настроек клавиатуры")
+        language.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            if self.settings.emojiKeyEnabled { self.toggleEmojiKeyboard() } else { self.cycleLanguage(.next) }
+        }, for: .touchUpInside)
         let settingsPress = UILongPressGestureRecognizer(target: self, action: #selector(settingsHeld(_:)))
         settingsPress.minimumPressDuration = settings.holdDelay
         settingsPress.delaysTouchesBegan = false; settingsPress.delaysTouchesEnded = false
         language.addGestureRecognizer(settingsPress)
         language.accessibilityCustomActions = [
-            UIAccessibilityCustomAction(name: "Настройки клавиатуры") { [weak self] _ in self?.showLocalSettings(); return true },
-            UIAccessibilityCustomAction(name: "Предыдущий язык") { [weak self] _ in self?.cycleLanguage(.previous); return true }
+            UIAccessibilityCustomAction(name: localized("Настройки клавиатуры")) { [weak self] _ in self?.showLocalSettings(); return true },
+            UIAccessibilityCustomAction(name: localized("Предыдущий язык")) { [weak self] _ in self?.cycleLanguage(.previous); return true }
         ]
         let gearHint = UIImageView(image: UIImage(systemName: "gearshape.fill"))
         gearHint.tintColor = .secondaryLabel; gearHint.isUserInteractionEnabled = false
@@ -696,26 +698,26 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             let systemKeyboard = makeButton("", special: true)
             systemKeyboard.setImage(UIImage(systemName: "keyboard", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18)), for: .normal)
             systemKeyboard.tintColor = theme.foreground
-            systemKeyboard.accessibilityLabel = "Другие системные клавиатуры"
+            systemKeyboard.accessibilityLabel = localized("Другие системные клавиатуры")
             systemKeyboard.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
             attach(systemKeyboard)
         }
-        let comma = makeButton(","); comma.accessibilityLabel = "Запятая"
+        let comma = makeButton(","); comma.accessibilityLabel = localized("Запятая")
         configureTextAction(comma, text: ",")
         attach(comma)
         let space = SpacebarButton(frame: .zero)
         configureButton(space, title: spaceTitle())
         spaceButton = space
-        space.accessibilityLabel = "Пробел"; space.accessibilityValue = state.language.title
-        space.accessibilityHint = "Быстрый свайп влево или вправо меняет язык. Удерживайте и двигайте палец для перемещения курсора."
+        space.accessibilityLabel = localized("Пробел"); space.accessibilityValue = state.language.title
+        space.accessibilityHint = localized("Быстрый свайп влево или вправо меняет язык. Удерживайте и двигайте палец для перемещения курсора.")
         space.titleLabel?.font = .systemFont(ofSize: 14)
         space.onAction = { [weak self] action in self?.handleSpaceAction(action) }
         space.onCursorEnd = { [weak self] in self?.setCursorMode(false) }
         space.accessibilityCustomActions = [
-            UIAccessibilityCustomAction(name: "Следующий язык") { [weak self] _ in self?.cycleLanguage(.next); return true },
-            UIAccessibilityCustomAction(name: "Предыдущий язык") { [weak self] _ in self?.cycleLanguage(.previous); return true },
-            UIAccessibilityCustomAction(name: "Курсор влево") { [weak self] _ in self?.moveCursor(-1); return true },
-            UIAccessibilityCustomAction(name: "Курсор вправо") { [weak self] _ in self?.moveCursor(1); return true }
+            UIAccessibilityCustomAction(name: localized("Следующий язык")) { [weak self] _ in self?.cycleLanguage(.next); return true },
+            UIAccessibilityCustomAction(name: localized("Предыдущий язык")) { [weak self] _ in self?.cycleLanguage(.previous); return true },
+            UIAccessibilityCustomAction(name: localized("Курсор влево")) { [weak self] _ in self?.moveCursor(-1); return true },
+            UIAccessibilityCustomAction(name: localized("Курсор вправо")) { [weak self] _ in self?.moveCursor(1); return true }
         ]
         attach(space)
         let punctuation = makeButton("."); configureTextAction(punctuation, text: ".")
@@ -775,6 +777,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             if let button, !(button is TextKeyButton) { self?.showKeyPreview(for: button) }
         }, for: .touchDragEnter)
     }
+    private func localized(_ source: String) -> String {
+        GlassTypeText.translate(source, to: settings.interfaceLanguage)
+    }
     private func keyFontSize() -> CGFloat {
         lastLandscape ? (settings.compactKeys ? 18 : 19) : (settings.compactKeys ? 21 : 22)
     }
@@ -815,7 +820,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         keyPreview.alpha = 1; keyPreview.transform = .identity
     }
     private var canLearnTouch: Bool {
-        settings.touchAdaptationEnabled && !state.symbols && !cursorMode && settingsPanel == nil && lexiconEditing == nil &&
+        settings.touchAdaptationEnabled && !state.symbols && !state.emoji && !cursorMode && settingsPanel == nil && lexiconEditing == nil &&
         textAllowsAutomation && textDocumentProxy.autocorrectionType != .no && textDocumentProxy.spellCheckingType != .no &&
         textDocumentProxy.documentContextBeforeInput != nil && (textDocumentProxy.selectedText ?? "").isEmpty && !UIAccessibility.isVoiceOverRunning
     }
@@ -876,7 +881,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         press.allowableMovement = 8
         press.delaysTouchesBegan = false; press.delaysTouchesEnded = false
         button.addGestureRecognizer(press)
-        button.accessibilityHint = "Удерживайте для: " + alternatives.joined(separator: ", ")
+        button.accessibilityHint = localized("Удерживайте для: ") + alternatives.joined(separator: ", ")
         button.accessibilityCustomActions = alternatives.map { value in
             UIAccessibilityCustomAction(name: value) { [weak self] _ in self?.performFeedback(); self?.insert(value); return true }
         }
@@ -910,12 +915,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         ])
         let header = UIView(); header.backgroundColor = .clear
         header.translatesAutoresizingMaskIntoConstraints = false; panel.addSubview(header)
-        let title = UILabel(); title.text = "Клавиатура"
+        let title = UILabel(); title.text = localized("Клавиатура")
         title.font = .preferredFont(forTextStyle: .headline); title.adjustsFontForContentSizeCategory = true
         title.adjustsFontSizeToFitWidth = true; title.minimumScaleFactor = 0.8
         title.accessibilityTraits.insert(.header)
         title.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(title)
-        let done = UIButton(type: .system); done.setTitle("Готово", for: .normal)
+        let done = UIButton(type: .system); done.setTitle(localized("Готово"), for: .normal)
         done.titleLabel?.font = .preferredFont(forTextStyle: .body)
         done.titleLabel?.adjustsFontForContentSizeCategory = true
         done.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(done)
@@ -949,7 +954,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             content.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -24)
         ])
         func card(_ heading: String) -> UIStackView {
-            let caption = UILabel(); caption.text = heading
+            let caption = UILabel(); caption.text = localized(heading)
             caption.font = .preferredFont(forTextStyle: .footnote); caption.textColor = .secondaryLabel
             caption.adjustsFontForContentSizeCategory = true; caption.accessibilityTraits.insert(.header)
             content.addArrangedSubview(caption)
@@ -974,15 +979,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         @discardableResult
         func toggle(_ text: String, value: Bool, group: UIStackView, change: @escaping (Bool) -> Void) -> UISwitch {
+            let title = localized(text)
             let line = UIControl(); line.isAccessibilityElement = false
             line.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-            let label = UILabel(); label.text = text; label.numberOfLines = 0
+            let label = UILabel(); label.text = title; label.numberOfLines = 0
             label.font = .preferredFont(forTextStyle: .body); label.adjustsFontForContentSizeCategory = true
             label.isAccessibilityElement = false; label.translatesAutoresizingMaskIntoConstraints = false
             line.addSubview(label)
             // Default UISwitch styling lets the running iOS choose its own
             // thumb, track, accessibility appearance and interaction.
-            let control = UISwitch(); control.isOn = value; control.accessibilityLabel = text
+            let control = UISwitch(); control.isOn = value; control.accessibilityLabel = title
             control.translatesAutoresizingMaskIntoConstraints = false; line.addSubview(control)
             control.setContentCompressionResistancePriority(.required, for: .horizontal)
             NSLayoutConstraint.activate([
@@ -1005,11 +1011,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             return control
         }
         func segmented(_ text: String, control: UISegmentedControl, group: UIStackView) {
+            let title = localized(text)
             let container = UIView()
-            let label = UILabel(); label.text = text; label.numberOfLines = 0
+            let label = UILabel(); label.text = title; label.numberOfLines = 0
             label.font = .preferredFont(forTextStyle: .body); label.adjustsFontForContentSizeCategory = true
             label.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(label)
-            control.accessibilityLabel = text; control.translatesAutoresizingMaskIntoConstraints = false
+            control.accessibilityLabel = title; control.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(control)
             NSLayoutConstraint.activate([
                 label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
@@ -1023,6 +1030,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             ])
             append(container, to: group)
         }
+
+        let locale = card("Язык интерфейса")
+        let localeControl = UISegmentedControl(items: InterfaceLanguage.allCases.map(\.shortTitle))
+        localeControl.selectedSegmentIndex = InterfaceLanguage.allCases.firstIndex(of: settings.interfaceLanguage) ?? 0
+        localeControl.addAction(UIAction { [weak self, weak localeControl] _ in
+            guard let self, let localeControl, InterfaceLanguage.allCases.indices.contains(localeControl.selectedSegmentIndex) else { return }
+            self.settings.interfaceLanguage = InterfaceLanguage.allCases[localeControl.selectedSegmentIndex]
+            self.settings.saveKeyboardOverrides()
+        }, for: .valueChanged)
+        segmented("Язык интерфейса", control: localeControl, group: locale)
 
         let languages = card("Языки ввода · минимум один")
         for language in KeyboardLanguage.allCases {
@@ -1054,7 +1071,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             self?.settings.glideTyping = value; self?.settings.saveKeyboardOverrides()
         }
         let feedbackCard = card("Тактильный отклик")
-        let haptics = UISegmentedControl(items: HapticChoice.allCases.map(\.title))
+        let haptics = UISegmentedControl(items: HapticChoice.allCases.map { localized($0.title) })
         haptics.selectedSegmentIndex = HapticChoice.allCases.firstIndex(of: settings.haptics) ?? 0
         haptics.addAction(UIAction { [weak self, weak haptics] _ in
             guard let self, let haptics, HapticChoice.allCases.indices.contains(haptics.selectedSegmentIndex) else { return }
@@ -1087,6 +1104,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             self.settings.showKeyPreview = value; self.settings.saveKeyboardOverrides()
             if !value { self.hideKeyPreview() }
         }
+        toggle("Заменить глобус на эмодзи", value: settings.emojiKeyEnabled, group: appearance) { [weak self] value in
+            self?.settings.emojiKeyEnabled = value; self?.settings.saveKeyboardOverrides()
+        }
         let accuracy = card("Точность касаний")
         toggle("Адаптация касаний", value: settings.touchAdaptationEnabled, group: accuracy) { [weak self] value in
             guard let self else { return }
@@ -1097,18 +1117,18 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         let calibrationNote = UILabel(); calibrationNote.numberOfLines = 0
         calibrationNote.font = .preferredFont(forTextStyle: .footnote); calibrationNote.textColor = .secondaryLabel
-        calibrationNote.text = "Только обезличенные средние смещения и разброс. Буквы, сообщения, пароли и история координат не сохраняются. Сброс — отдельно для всех ориентаций."
+        calibrationNote.text = localized("Только обезличенные средние смещения и разброс. Буквы, сообщения, пароли и история координат не сохраняются. Сброс — отдельно для всех ориентаций.")
         content.addArrangedSubview(calibrationNote)
-        let clearCalibration = UIButton(type: .system); clearCalibration.setTitle("Сбросить адаптацию касаний", for: .normal)
+        let clearCalibration = UIButton(type: .system); clearCalibration.setTitle(localized("Сбросить адаптацию касаний"), for: .normal)
         clearCalibration.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         clearCalibration.addAction(UIAction { [weak self, weak clearCalibration] _ in
-            self?.resetTouchCalibration(); clearCalibration?.setTitle("Адаптация сброшена", for: .normal)
+            self?.resetTouchCalibration(); clearCalibration?.setTitle(self?.localized("Адаптация сброшена"), for: .normal)
         }, for: .touchUpInside)
         append(clearCalibration, to: accuracy)
         let dictionaryCard = card("Личный словарь")
         let dictionary = UIButton(type: .system)
         var dictionaryStyle = UIButton.Configuration.plain()
-        dictionaryStyle.title = "Замены и исключения"
+        dictionaryStyle.title = localized("Замены и исключения")
         dictionaryStyle.image = UIImage(systemName: "chevron.forward")
         dictionaryStyle.imagePlacement = .trailing; dictionaryStyle.imagePadding = 8
         dictionaryStyle.baseForegroundColor = .label
@@ -1121,11 +1141,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let note = UILabel(); note.numberOfLines = 0
         note.font = .preferredFont(forTextStyle: .footnote); note.adjustsFontForContentSizeCategory = true
         note.textColor = .secondaryLabel
-        note.text = "Изменения сохраняются сразу. «Готово» применяет оформление. Если вибрации нет, проверьте полный доступ и системные настройки тактильных сигналов."
+        note.text = localized("Изменения сохраняются сразу. «Готово» применяет оформление. Тактильный отклик зависит от iOS и устройства.")
         content.addArrangedSubview(note)
         let reset = UIButton(type: .system)
         var resetStyle = UIButton.Configuration.plain()
-        resetStyle.title = "Сбросить локальные настройки"; resetStyle.baseForegroundColor = .systemRed
+        resetStyle.title = localized("Сбросить локальные настройки"); resetStyle.baseForegroundColor = .systemRed
         resetStyle.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)
         reset.configuration = resetStyle; reset.titleLabel?.numberOfLines = 0
         reset.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
@@ -1133,7 +1153,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             KeyboardSettings.clearKeyboardOverrides(); self?.reloadSettings()
         }, for: .touchUpInside)
         content.addArrangedSubview(reset)
-        let preservation = UILabel(); preservation.text = "Личный словарь при сбросе сохранится."
+        let preservation = UILabel(); preservation.text = localized("Личный словарь при сбросе сохранится.")
         preservation.numberOfLines = 0; preservation.textColor = .secondaryLabel
         preservation.font = .preferredFont(forTextStyle: .footnote); preservation.adjustsFontForContentSizeCategory = true
         content.addArrangedSubview(preservation)
@@ -1186,7 +1206,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         update(rows)
         spaceButton?.setTitle(active ? "↔" : spaceTitle(), for: .normal)
-        spaceButton?.accessibilityValue = active ? "Управление курсором" : state.language.title
+        spaceButton?.accessibilityValue = active ? localized("Управление курсором") : state.language.title
         if active {
             for button in keyPlane.keyViews where button is TextKeyButton { button.cancelTracking(with: nil) }
             dismissPopup(); stopDeleting(); performFeedback()
@@ -1216,7 +1236,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         if !cursorMode { updateContext() }
     }
-    private var needsToolbar: Bool { settings.suggestions || settings.showKeyPreview || settings.swipeDeleteWord || settings.glideTyping || lexiconEditing != nil }
+    private var needsToolbar: Bool { true } // Keep explicit paste available even when suggestions are disabled.
     private func scheduleSettingsHint(for button: KeyButton) {
         hideKeyPreview()
         let task = DispatchWorkItem { [weak self, weak button] in
@@ -1275,7 +1295,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private var currentDraft: String { lexiconEditing == .replacement ? draftValue : draftSource }
     private var editorPrompt: String {
-        switch lexiconEditing { case .source: return "Сокращение: "; case .replacement: return "Замена: "; case .exception: return "Не исправлять: "; case nil: return "" }
+        switch lexiconEditing { case .source: return localized("Сокращение: "); case .replacement: return localized("Замена: "); case .exception: return localized("Не исправлять: "); case nil: return "" }
     }
     private func configureEditorBar() {
         clear(toolbar)
@@ -1283,7 +1303,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         cancel.addAction(UIAction { [weak self] _ in self?.finishLexiconEditing(cancelled: true) }, for: .touchUpInside)
         let label = UILabel(); label.font = .systemFont(ofSize: 13); label.textColor = theme.foreground
         label.text = editorPrompt + currentDraft + "▏"; label.lineBreakMode = .byTruncatingHead; draftLabel = label
-        let done = UIButton(type: .system); done.setTitle(lexiconEditing == .source ? "Далее" : "✓", for: .normal); done.tintColor = theme.foreground
+        let done = UIButton(type: .system); done.setTitle(lexiconEditing == .source ? localized("Далее") : "✓", for: .normal); done.tintColor = theme.foreground
         done.addAction(UIAction { [weak self] _ in self?.finishLexiconEditing(cancelled: false) }, for: .touchUpInside)
         toolbar.addArrangedSubview(cancel); toolbar.addArrangedSubview(label); toolbar.addArrangedSubview(done)
         cancel.widthAnchor.constraint(equalToConstant: 30).isActive = true
@@ -1303,17 +1323,17 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private func beginLexiconEditing(_ field: LexiconField) {
         hideLocalSettings(); draftSource = ""; draftValue = ""; lexiconEditing = field
-        state.symbols = false; rebuild(); updateContext()
+        state.symbols = false; state.emoji = false; rebuild(); updateContext()
     }
     private func finishLexiconEditing(cancelled: Bool) {
         if !cancelled {
             let source = draftSource.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !source.isEmpty, source.allSatisfy({ $0.isLetter }) else { draftLabel?.text = "Введите одно слово буквами"; return }
+            guard !source.isEmpty, source.allSatisfy({ $0.isLetter }) else { draftLabel?.text = localized("Введите одно слово буквами"); return }
             if lexiconEditing == .source { lexiconEditing = .replacement; rebuild(); updateContext(); return }
             if lexiconEditing == .exception { settings.personalLexicon.excludedWords.append(source) }
             else {
                 let value = draftValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !value.isEmpty else { draftLabel?.text = "Введите замену"; return }
+                guard !value.isEmpty else { draftLabel?.text = localized("Введите замену"); return }
                 settings.personalLexicon.replacements[source.lowercased()] = value
             }
             settings.personalLexicon = settings.personalLexicon.sanitized(); settings.saveKeyboardOverrides()
@@ -1334,17 +1354,17 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             button.titleLabel?.numberOfLines = 2; button.titleLabel?.font = .systemFont(ofSize: 14)
             button.addAction(UIAction { _ in handler() }, for: .touchUpInside); stack.addArrangedSubview(button)
         }
-        action("Готово") { [weak self] in self?.rebuild(); self?.updateContext() }
-        action("＋ Добавить замену") { [weak self] in self?.beginLexiconEditing(.source) }
-        action("＋ Не исправлять слово") { [weak self] in self?.beginLexiconEditing(.exception) }
+        action(localized("Готово")) { [weak self] in self?.rebuild(); self?.updateContext() }
+        action(localized("＋ Добавить замену")) { [weak self] in self?.beginLexiconEditing(.source) }
+        action(localized("＋ Не исправлять слово")) { [weak self] in self?.beginLexiconEditing(.exception) }
         let note = UILabel(); note.numberOfLines = 0; note.font = .systemFont(ofSize: 12); note.textColor = .secondaryLabel
-        note.text = "Записи хранятся только на устройстве. При добавлении используйте клавиши ниже; текст в приложении не изменяется. Нажмите запись для удаления."
+        note.text = localized("Записи хранятся только на устройстве. При добавлении используйте клавиши ниже; текст в приложении не изменяется. Нажмите запись для удаления.")
         stack.addArrangedSubview(note)
         for (source, target) in settings.personalLexicon.replacements.sorted(by: { $0.key < $1.key }) {
             action("\(source) → \(target)   ×") { [weak self] in self?.settings.personalLexicon.replacements.removeValue(forKey: source); self?.settings.saveKeyboardOverrides(); self?.showLexiconPanel() }
         }
         for word in settings.personalLexicon.excludedWords.sorted() {
-            action("Не исправлять: \(word)   ×") { [weak self] in self?.settings.personalLexicon.excludedWords.removeAll { $0 == word }; self?.settings.saveKeyboardOverrides(); self?.showLexiconPanel() }
+            action(localized("Не исправлять: ") + "\(word)   ×") { [weak self] in self?.settings.personalLexicon.excludedWords.removeAll { $0 == word }; self?.settings.saveKeyboardOverrides(); self?.showLexiconPanel() }
         }
     }
     private var inputContext: InputContextSnapshot {
@@ -1380,6 +1400,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 case .deleteWord: deleteWord()
                 case .shift: shiftTapped()
                 case .symbols: toggleSymbols()
+                case .emoji: toggleEmojiKeyboard()
                 case .language(let direction): cycleLanguage(direction)
                 case .glide(let request): decodeGlide(request)
                 case .suggestion(let word, let prefix): accept(word, prefix: prefix)
@@ -1388,7 +1409,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
     }
     private func decodeGlide(_ request: GlideRequest) {
-        guard settings.glideTyping, !state.symbols, !cursorMode, settingsPanel == nil,
+        guard settings.glideTyping, !state.symbols, !state.emoji, !cursorMode, settingsPanel == nil,
               lexiconEditing == nil, textAllowsAutomation, request.language == state.language,
               inputContext.isUsable else { return }
         let context = inputContext
@@ -1400,7 +1421,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                                                 language: request.language, extraWords: extras)
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.pendingInput.token == token else { return }
-                guard self.view.window != nil, self.settings.glideTyping, !self.state.symbols,
+                guard self.view.window != nil, self.settings.glideTyping, !self.state.symbols, !self.state.emoji,
                       !self.cursorMode, self.settingsPanel == nil, self.lexiconEditing == nil,
                       self.textAllowsAutomation, self.state.language == request.language else {
                     self.pendingInput.cancel(); return
@@ -1412,7 +1433,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
     }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard gestureRecognizer === glidePan, settings.glideTyping, !state.symbols, !cursorMode, settingsPanel == nil, lexiconEditing == nil, textAllowsAutomation else { return false }
+        guard gestureRecognizer === glidePan, settings.glideTyping, !state.symbols, !state.emoji, !cursorMode, settingsPanel == nil, lexiconEditing == nil, textAllowsAutomation else { return false }
         var target = touch.view
         while let candidate = target {
             if letterButtons.contains(where: { $0.0 === candidate }) { return true }
@@ -1422,7 +1443,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer === glidePan else { return true }
-        return settings.glideTyping && !state.symbols && !cursorMode && settingsPanel == nil && lexiconEditing == nil && textAllowsAutomation
+        return settings.glideTyping && !state.symbols && !state.emoji && !cursorMode && settingsPanel == nil && lexiconEditing == nil && textAllowsAutomation
     }
     @objc private func glideChanged(_ pan: GlideTouchRecognizer) {
         switch pan.state {
@@ -1436,7 +1457,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         case .changed:
             if let point = pan.points.last { appendTrailPoint(point) }
         case .ended:
-            guard settings.glideTyping, !state.symbols, !cursorMode, settingsPanel == nil, lexiconEditing == nil, textAllowsAutomation,
+            guard settings.glideTyping, !state.symbols, !state.emoji, !cursorMode, settingsPanel == nil, lexiconEditing == nil, textAllowsAutomation,
                   let snapshot = glideSnapshot, snapshot.0.matches(inputContext), snapshot.1 == state.language else { resetGlidePresentation(); return }
             let points = pan.points
             if let model = keyPlane.recognizer, GlideActivation.isShortStroke(points, keyPitch: model.geometry.pitch),
@@ -1462,7 +1483,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private func commitGlide(_ decoded: [String], context: InputContextSnapshot) {
         guard let best = decoded.first else {
             clear(suggestions); suggestionSignature = "glide-miss"
-            let label = UILabel(); label.text = "Нет совпадений"; label.textColor = .secondaryLabel
+            let label = UILabel(); label.text = localized("Нет совпадений"); label.textColor = .secondaryLabel
             label.textAlignment = .center; label.font = .systemFont(ofSize: 13); suggestions.addArrangedSubview(label)
             return
         }
@@ -1534,11 +1555,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private func returnTitle() -> String {
         switch textDocumentProxy.returnKeyType ?? .default {
         case .go: return "Go"
-        case .search: return "Поиск"
-        case .send: return "Отпр."
-        case .done: return "Готово"
-        case .next: return "Далее"
-        default: return "Ввод"
+        case .search: return localized("Поиск")
+        case .send: return localized("Отпр.")
+        case .done: return localized("Готово")
+        case .next: return localized("Далее")
+        default: return localized("Клавиша ввода")
         }
     }
     private func insert(_ text: String) {
@@ -1573,9 +1594,39 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if text == " " { rememberSpace() }
         updateContext()
     }
+    private func paste(_ provider: NSItemProvider) {
+        guard textDocumentProxy.isSecureTextEntry != true,
+              provider.canLoadObject(ofClass: NSString.self) else { return }
+        let context = inputContext
+        provider.loadObject(ofClass: NSString.self) { [weak self] object, _ in
+            guard let text = object as? String, !text.isEmpty, text.utf8.count <= 65_536 else { return }
+            DispatchQueue.main.async {
+                guard let self, self.textDocumentProxy.isSecureTextEntry != true,
+                      context.matches(self.inputContext) else { return }
+                // This is a user-initiated paste. The clipboard value remains
+                // transient and is never added to settings or an input log.
+                self.pendingInput.cancel(); self.cancelGlide()
+                self.completedWord = nil; self.lastSpace = nil; self.correctionUndo = nil
+                self.suppressedCorrection = nil; self.deletionUndo = nil
+                self.textDocumentProxy.insertText(text)
+                self.updateContext()
+            }
+        }
+    }
     private var textAllowsAutomation: Bool {
-        let type = textDocumentProxy.keyboardType ?? .default
-        return textDocumentProxy.isSecureTextEntry != true && ![UIKeyboardType.URL, .emailAddress, .numberPad, .decimalPad, .phonePad, .namePhonePad, .asciiCapableNumberPad].contains(type)
+        let kind: KeyboardInputFieldKind
+        switch textDocumentProxy.keyboardType ?? .default {
+        case .emailAddress: kind = .email
+        case .URL: kind = .url
+        case .phonePad, .namePhonePad: kind = .phone
+        case .numberPad: kind = .number
+        case .decimalPad: kind = .decimal
+        case .asciiCapableNumberPad: kind = .asciiNumber
+        case .webSearch: kind = .webSearch
+        case .twitter: kind = .social
+        default: kind = .standard
+        }
+        return TextAutomationPolicy.allowsCorrection(in: kind, isSecure: textDocumentProxy.isSecureTextEntry == true)
     }
     private func invalidateSpaceSnapshot() {
         guard let last = lastSpace else { return }
@@ -1597,22 +1648,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
               textDocumentProxy.autocorrectionType != .no,
               let context = textDocumentProxy.documentContextBeforeInput,
               let word = personalWord(in: context) else { return false }
-        let type = textDocumentProxy.keyboardType ?? .default
-        guard ![UIKeyboardType.URL, .emailAddress, .numberPad, .decimalPad, .phonePad, .namePhonePad, .asciiCapableNumberPad].contains(type) else { return false }
-        if suppressedCorrection == word || settings.personalLexicon.excludes(word) { return false }
-        let replacement: String
-        if let personal = settings.personalLexicon.replacement(for: word) { replacement = personal }
-        else {
-            if let explicit = correctionEngine.replacement(for: word, language: state.language) { replacement = explicit }
-            else {
-                guard let local = OfflineLexicon.preparedCheck(word, language: state.language), !local.known else { return false }
-                let checked = spelling.check(word, language: state.language)
-                let known = checked.known
-                let candidates = local.rankedCandidates + checked.candidates.map { AutocorrectionEngine.Candidate($0) }
-                guard let candidate = correctionEngine.rankedReplacement(for: word, language: state.language, candidates: candidates, isKnownWord: known) else { return false }
-                replacement = candidate
-            }
-        }
+        guard suppressedCorrection != word,
+              let replacement = textService.replacement(for: word, language: state.language,
+                                                        personalLexicon: settings.personalLexicon),
+              replacement != word else { return false }
         guard textDocumentProxy.documentContextBeforeInput == context, (textDocumentProxy.selectedText ?? "").isEmpty else { return false }
         correctionUndo = nil
         for _ in word { textDocumentProxy.deleteBackward() }
@@ -1640,20 +1679,37 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private func toggleSymbols() {
         if pendingInput.deferIfBusy(.symbols) { return }
+        state.emoji = false
         state.symbols.toggle()
         if state.symbols { state.symbolPage = .numbers }
         rebuild(preservingInput: drainingInput)
     }
+    private func toggleEmojiKeyboard() {
+        if pendingInput.deferIfBusy(.emoji) { return }
+        state.emoji.toggle()
+        if state.emoji { state.symbols = false }
+        rebuild(preservingInput: drainingInput)
+    }
+    private func leaveEmojiKeyboard() {
+        guard state.emoji else { return }
+        toggleEmojiKeyboard()
+    }
     private func refreshLabels() {
-        let uppercase = !state.symbols && state.shift != .off
+        let uppercase = !state.symbols && !state.emoji && state.shift != .off
         if renderedLetterCase != uppercase {
             for (button, key) in letterButtons {
-                let value = state.symbols || state.shift == .off ? key : key.uppercased()
+                let value = state.symbols || state.emoji || state.shift == .off ? key : key.uppercased()
                 if button.title(for: .normal) != value { button.setTitle(value, for: .normal); button.accessibilityLabel = value }
             }
             renderedLetterCase = uppercase
         }
-        if state.symbols {
+        if state.emoji {
+            if renderedShift != "emoji-abc" {
+                shiftButton?.setImage(nil, for: .normal)
+                shiftButton?.setTitle("ABC", for: .normal)
+                renderedShift = "emoji-abc"
+            }
+        } else if state.symbols {
             let identity = "page:" + state.symbolPage.switchTitle
             if renderedShift != identity {
                 shiftButton?.setImage(nil, for: .normal)
@@ -1671,7 +1727,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         (shiftButton as? KeyButton)?.fillColor = theme.key
         shiftButton?.tintColor = theme.foreground
         shiftButton?.setTitleColor(theme.foreground, for: .normal)
-        shiftButton?.accessibilityValue = state.symbols ? (state.symbolPage == .numbers ? "123" : "#*=") : (state.shift == .locked ? "Caps Lock" : (state.shift == .once ? "Включён" : "Выключен"))
+        shiftButton?.accessibilityValue = state.emoji ? localized("Эмодзи") : (state.symbols ? (state.symbolPage == .numbers ? "123" : "#*=") : (state.shift == .locked ? "Caps Lock" : (state.shift == .once ? localized("Включён") : localized("Выключен"))))
     }
     private func stopDeleting() { deleteButton?.cancelInteraction() }
     private func deleteOnce(allowGlideWord: Bool = true) {
@@ -1718,10 +1774,14 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private func refreshSuggestions() {
         guard lexiconEditing == nil else { return }
+        if state.emoji {
+            if suggestionSignature != "emoji-layout" { clear(suggestions); suggestionSignature = "emoji-layout" }
+            return
+        }
         if let undo = deletionUndo, undo.matches(before: textDocumentProxy.documentContextBeforeInput, after: textDocumentProxy.documentContextAfterInput, document: String(describing: textDocumentProxy.documentIdentifier), hasSelection: !(textDocumentProxy.selectedText ?? "").isEmpty) {
             if suggestionSignature != "undo-delete" {
                 clear(suggestions); suggestionSignature = "undo-delete"
-                let button = makeButton("Вернуть слово", special: true); button.titleLabel?.font = .systemFont(ofSize: 14)
+                let button = makeButton(localized("Вернуть слово"), special: true); button.titleLabel?.font = .systemFont(ofSize: 14)
                 button.addAction(UIAction { [weak self] _ in self?.restoreDeletedWord() }, for: .touchUpInside); suggestions.addArrangedSubview(button)
             }
             return

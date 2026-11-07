@@ -29,12 +29,16 @@ public struct KeyboardGeometry {
 
     public static func make(bounds: CGRect, language: KeyboardLanguage,
                             symbolPage: SymbolPage? = nil, compact: Bool = true,
-                            needsSystemKey: Bool = false) -> KeyboardGeometry {
+                            needsSystemKey: Bool = false, customRows: [[String]]? = nil,
+                            thirdRowUsesModeSwitch: Bool = false) -> KeyboardGeometry {
         guard [bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height].allSatisfy({ $0.isFinite }),
               bounds.width >= 80, bounds.height >= 80 else {
             return KeyboardGeometry(bounds: .zero, language: language, keys: [], pitch: .zero)
         }
-        let rows = symbolPage?.rows ?? language.rows
+        let rows = customRows ?? symbolPage?.rows ?? language.rows
+        guard rows.count == 3, rows.allSatisfy({ !$0.isEmpty }) else {
+            return KeyboardGeometry(bounds: .zero, language: language, keys: [], pitch: .zero)
+        }
         let columns = max(rows[0].count, max(rows[1].count, rows[2].count + 2))
         let margin: CGFloat = 4, bottomMargin: CGFloat = 5
         let contentWidth = bounds.width - margin * 2
@@ -62,7 +66,7 @@ public struct KeyboardGeometry {
             let characters = rows[row].map(KeyboardKeyRole.character)
             if row == 2 {
                 let functionWeight = CGFloat(columns - rows[row].count) / 2
-                appendRow([.shift] + characters + [.backspace],
+                appendRow([thirdRowUsesModeSwitch ? .modeSwitch : .shift] + characters + [.backspace],
                           weights: [functionWeight] + Array(repeating: 1, count: characters.count) + [functionWeight], row: row)
             } else {
                 // EN's second row is offset by half a pitch; Cyrillic layouts

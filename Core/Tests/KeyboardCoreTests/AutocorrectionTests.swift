@@ -3,6 +3,29 @@ import XCTest
 
 final class AutocorrectionTests: XCTestCase {
     private let engine = AutocorrectionEngine()
+    private let pipeline = AutocorrectionPipeline()
+
+    func testCorrectionPipelineHonorsPersonalReplacementAndExclusionFirst() {
+        let lexicon = PersonalLexicon(replacements: ["helo": "hello"], excludedWords: ["teh"])
+        XCTAssertFalse(pipeline.needsDictionaryChecks(for: "helo", language: .english, personalLexicon: lexicon))
+        XCTAssertEqual(pipeline.replacement(for: "helo", language: .english, personalLexicon: lexicon, offlineCheck: nil), "hello")
+        XCTAssertNil(pipeline.replacement(for: "teh", language: .english, personalLexicon: lexicon, offlineCheck: nil))
+    }
+
+    func testCorrectionPipelineUsesExplicitRulesWithoutDictionarySnapshot() {
+        XCTAssertEqual(pipeline.replacement(for: "helo", language: .english, personalLexicon: PersonalLexicon(), offlineCheck: nil), "hello")
+        XCTAssertFalse(pipeline.needsDictionaryChecks(for: "helo", language: .english, personalLexicon: PersonalLexicon()))
+    }
+
+    func testCorrectionPipelineCombinesOfflineCandidatesAndRespectsKnownWords() {
+        let misspelled = OfflineLexicon.SpellingCheck(known: false, candidates: ["hello"],
+                                                      rankedCandidates: [.init("hello", frequencyRank: 1)])
+        XCTAssertEqual(pipeline.replacement(for: "hellp", language: .english, personalLexicon: PersonalLexicon(),
+                                            offlineCheck: misspelled), "hello")
+        let known = OfflineLexicon.SpellingCheck(known: true, candidates: [], rankedCandidates: [])
+        XCTAssertNil(pipeline.replacement(for: "hello", language: .english, personalLexicon: PersonalLexicon(),
+                                          offlineCheck: known, systemCandidates: ["hell"]))
+    }
     func testRankedCorrectionAcceptsMergedDictionariesWithMoreThanEightGuesses() {
         let guesses = Array(repeating: AutocorrectionEngine.Candidate("unrelated", frequencyRank: 1), count: 12)
             + [.init("keyboard", frequencyRank: 8791)]

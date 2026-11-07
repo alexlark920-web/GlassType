@@ -104,6 +104,9 @@ for path in [*ROOT.glob('*/Info.plist'), *ROOT.glob('*/*.entitlements'), *ROOT.g
 keyboard = plists['Keyboard/Info.plist']['NSExtension']
 require(keyboard['NSExtensionPointIdentifier'] == 'com.apple.keyboard-service', 'Incorrect extension point')
 require(keyboard['NSExtensionPrincipalClass'] == '$(PRODUCT_MODULE_NAME).KeyboardViewController', 'Incorrect principal class')
+require(plists['App/Info.plist']['CFBundleShortVersionString'] == plists['Keyboard/Info.plist']['CFBundleShortVersionString'], 'App and keyboard versions differ')
+require(plists['App/Info.plist']['CFBundleVersion'] == plists['Keyboard/Info.plist']['CFBundleVersion'], 'App and keyboard build numbers differ')
+require((ROOT / 'Scripts/package_source.py').is_file(), 'Missing versioned source archiver')
 group = plists['App/App.entitlements']['com.apple.security.application-groups']
 require(group == plists['Keyboard/Keyboard.entitlements']['com.apple.security.application-groups'], 'App Group mismatch')
 require(group[0] in (ROOT / 'Shared/Settings.swift').read_text(), 'Settings App Group mismatch')

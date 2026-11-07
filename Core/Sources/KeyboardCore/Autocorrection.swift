@@ -150,6 +150,36 @@ public struct AutocorrectionEngine {
     }
 }
 
+/// Coordinates explicit user rules and offline/system spelling evidence. The
+/// UIKit caller supplies a bounded snapshot; this value never reads a document
+/// or stores learned words.
+public struct AutocorrectionPipeline {
+    private let engine: AutocorrectionEngine
+
+    public init(engine: AutocorrectionEngine = AutocorrectionEngine()) { self.engine = engine }
+
+    public func needsDictionaryChecks(for word: String, language: KeyboardLanguage,
+                                      personalLexicon: PersonalLexicon) -> Bool {
+        guard !personalLexicon.excludes(word), personalLexicon.replacement(for: word) == nil,
+              engine.replacement(for: word, language: language) == nil else { return false }
+        return true
+    }
+
+    public func replacement(for word: String, language: KeyboardLanguage,
+                            personalLexicon: PersonalLexicon,
+                            offlineCheck: OfflineLexicon.SpellingCheck?,
+                            systemWordIsKnown: Bool = false,
+                            systemCandidates: [String] = []) -> String? {
+        guard !personalLexicon.excludes(word) else { return nil }
+        if let personal = personalLexicon.replacement(for: word) { return personal }
+        if let explicit = engine.replacement(for: word, language: language) { return explicit }
+        guard let offlineCheck, !offlineCheck.known else { return nil }
+        let candidates = offlineCheck.rankedCandidates + systemCandidates.prefix(8).map { AutocorrectionEngine.Candidate($0) }
+        return engine.rankedReplacement(for: word, language: language, candidates: candidates,
+                                        isKnownWord: systemWordIsKnown)
+    }
+}
+
 /// A bounded snapshot ensures Backspace only undoes a correction at its cursor.
 public struct CorrectionUndo {
     public let original: String

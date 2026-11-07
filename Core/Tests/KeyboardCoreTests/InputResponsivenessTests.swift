@@ -68,9 +68,9 @@ final class InputResponsivenessTests: XCTestCase {
         XCTAssertEqual(state.insertedWord("hello"), "hello")
     }
     func testBackspaceStartsSoonerAndAcceleratesWithFiniteIntervals() {
-        XCTAssertEqual(BackspaceRepeat.initialDelay, 0.22, accuracy: 1e-8)
-        XCTAssertEqual(BackspaceRepeat.interval(heldFor: 0.22), 0.055, accuracy: 1e-8)
-        XCTAssertLessThan(BackspaceRepeat.interval(heldFor: 1), BackspaceRepeat.interval(heldFor: 0.22))
+        XCTAssertEqual(BackspaceRepeat.initialDelay, 0.16, accuracy: 1e-8)
+        XCTAssertEqual(BackspaceRepeat.interval(heldFor: 0.16), 0.055, accuracy: 1e-8)
+        XCTAssertLessThan(BackspaceRepeat.interval(heldFor: 1), BackspaceRepeat.interval(heldFor: 0.16))
         XCTAssertLessThan(BackspaceRepeat.interval(heldFor: 3), BackspaceRepeat.interval(heldFor: 1))
         for elapsed in [Double.nan, .infinity, -1, 0, 1, 100] {
             XCTAssertGreaterThanOrEqual(BackspaceRepeat.interval(heldFor: elapsed), 0.03)

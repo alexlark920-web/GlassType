@@ -4,6 +4,22 @@ import XCTest
 @testable import KeyboardCore
 
 final class KeyboardGeometryTests: XCTestCase {
+    func testEmojiRowsUseABCModeSwitchAndRetainBackspace() {
+        let geometry = KeyboardGeometry.make(bounds: CGRect(x: 0, y: 0, width: 390, height: 260),
+                                             language: .english, customRows: KeyboardLayout.emojiRows,
+                                             thirdRowUsesModeSwitch: true)
+        let thirdRow = geometry.keys.filter { $0.row == 2 }
+        XCTAssertEqual(thirdRow.first?.role, .modeSwitch)
+        XCTAssertEqual(thirdRow.last?.role, .backspace)
+        XCTAssertEqual(thirdRow.compactMap { $0.role.character }.count, KeyboardLayout.emojiRows[2].count)
+        XCTAssertTrue(thirdRow.compactMap { $0.role.character }.contains("❤️"))
+    }
+
+    func testMalformedCustomRowsReturnEmptyGeometryWithoutBreakingRegularLayouts() {
+        let bounds = CGRect(x: 0, y: 0, width: 390, height: 260)
+        XCTAssertTrue(KeyboardGeometry.make(bounds: bounds, language: .russian, customRows: [["x"]]).keys.isEmpty)
+        XCTAssertFalse(KeyboardGeometry.make(bounds: bounds, language: .russian).keys.isEmpty)
+    }
     private let sizes: [CGSize] = [CGSize(width: 312, height: 220), CGSize(width: 367, height: 225),
         CGSize(width: 385, height: 225), CGSize(width: 393, height: 229.7), CGSize(width: 422, height: 240), CGSize(width: 732, height: 155),
         CGSize(width: 734, height: 155), CGSize(width: 750, height: 155), CGSize(width: 844, height: 165)]

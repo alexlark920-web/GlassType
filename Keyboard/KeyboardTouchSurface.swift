@@ -6,6 +6,8 @@ import KeyboardCore
 final class KeyboardTouchSurface: UIView {
     var language: KeyboardLanguage = .english
     var symbolPage: SymbolPage?
+    var customRows: [[String]]?
+    var thirdRowUsesModeSwitch = false
     var compact = true
     var needsSystemKey = false
     var keyViews: [UIButton] = []
@@ -58,7 +60,8 @@ final class KeyboardTouchSurface: UIView {
         revision &+= 1; resetPresses()
         previousBounds = bounds
         let geometry = KeyboardGeometry.make(bounds: bounds, language: language, symbolPage: symbolPage,
-                                              compact: compact, needsSystemKey: needsSystemKey)
+                                              compact: compact, needsSystemKey: needsSystemKey,
+                                              customRows: customRows, thirdRowUsesModeSwitch: thirdRowUsesModeSwitch)
         guard geometry.keys.count == keyViews.count else { recognizer = nil; return }
         recognizer = TouchRecognizer(geometry: geometry, configuration: configuration)
         presses = Array(repeating: 0, count: keyViews.count)
