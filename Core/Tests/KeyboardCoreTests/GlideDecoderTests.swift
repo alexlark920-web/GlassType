@@ -86,7 +86,7 @@ final class GlideDecoderTests: XCTestCase {
         }
     }
     func testLargeDictionaryWordsAreNotCutOffAtFirst512Entries() {
-        let cases: [(String, KeyboardLanguage)] = [("keyboard", .english), ("клавиатура", .russian)]
+        let cases: [(String, KeyboardLanguage)] = [("keyboard", .english), ("клавиатура", .russian), ("клавіатура", .ukrainian)]
         for (word, language) in cases {
             XCTAssertGreaterThan(OfflineLexicon.frequencyIndex(word: word, language: language) ?? 0, 512)
             XCTAssertEqual(decoder.decode(points: path(word, language: language), keyCenters: centers(language), language: language).first, word)

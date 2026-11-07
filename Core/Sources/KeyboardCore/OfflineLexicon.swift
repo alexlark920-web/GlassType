@@ -6,20 +6,25 @@ public enum OfflineLexicon {
     private final class DataSet {
         let words: [String]
         let ranks: [String: Int]
+        let prefixes: [String: [Int32]]
         init(language: KeyboardLanguage) {
             guard let url = Bundle.module.url(forResource: "lexicon_" + language.rawValue, withExtension: "txt"),
                   let content = try? String(contentsOf: url, encoding: .utf8) else {
-                words = []; ranks = [:]; return
+                words = []; ranks = [:]; prefixes = [:]; return
             }
             var list: [String] = []
             var index: [String: Int] = [:]
-            list.reserveCapacity(20_000); index.reserveCapacity(20_000)
-            for line in content.split(whereSeparator: { $0.isNewline }).prefix(30_000) {
+            var groups: [String: [Int32]] = [:]
+            list.reserveCapacity(31_000); index.reserveCapacity(31_000); groups.reserveCapacity(1000)
+            for line in content.split(whereSeparator: { $0.isNewline }).prefix(31_000) {
                 let word = String(line)
                 guard (2...24).contains(word.count), index[word] == nil else { continue }
+                let position = Int32(list.count)
+                groups[String(word.prefix(1)), default: []].append(position)
+                groups[String(word.prefix(2)), default: []].append(position)
                 index[word] = list.count; list.append(word)
             }
-            words = list; ranks = index
+            words = list; ranks = index; prefixes = groups
         }
     }
     public static var licenseNotice: String {
@@ -42,7 +47,39 @@ public enum OfflineLexicon {
         cache[language] = result; cacheOrder.append(language)
         return result
     }
+    private static func preparedData(for language: KeyboardLanguage) -> DataSet? {
+        // UI callers can skip a suggestion frame instead of waiting on I/O.
+        guard lock.try() else { return nil }
+        defer { lock.unlock() }
+        return cache[language]
+    }
+    public static func isPrepared(language: KeyboardLanguage) -> Bool { preparedData(for: language) != nil }
     public static func words(language: KeyboardLanguage) -> [String] { data(for: language).words }
+    public static func completions(prefix: String, language: KeyboardLanguage, limit: Int = 3, cachedOnly: Bool = false) -> [String] {
+        let key = normalized(prefix)
+        guard (1...24).contains(key.count), limit > 0 else { return [] }
+        guard let dictionary = cachedOnly ? preparedData(for: language) : data(for: language) else { return [] }
+        guard let positions = dictionary.prefixes[String(key.prefix(2))] else { return [] }
+        var result: [String] = []; result.reserveCapacity(min(8, limit))
+        for position in positions {
+            let word = dictionary.words[Int(position)]
+            if word != key && word.hasPrefix(key) {
+                result.append(word)
+                if result.count == min(8, limit) { break }
+            }
+        }
+        return result
+    }
+    public struct SpellingCheck {
+        public let known: Bool
+        public let candidates: [String]
+    }
+    /// One immutable snapshot; never waits for corpus construction on a UI call.
+    public static func preparedCheck(_ word: String, language: KeyboardLanguage) -> SpellingCheck? {
+        guard let dictionary = preparedData(for: language) else { return nil }
+        let known = dictionary.ranks[normalized(word)] != nil
+        return SpellingCheck(known: known, candidates: known ? [] : candidates(for: word, language: language, dictionary: dictionary, limit: 8))
+    }
     public static func contains(_ word: String, language: KeyboardLanguage) -> Bool {
         data(for: language).ranks[normalized(word)] != nil
     }
@@ -55,10 +92,11 @@ public enum OfflineLexicon {
     /// Generate edit-distance-one words and use O(1) dictionary membership.
     /// This avoids scanning every word or retaining a large deletion index.
     public static func correctionCandidates(for word: String, language: KeyboardLanguage, limit: Int = 8) -> [String] {
+        candidates(for: word, language: language, dictionary: data(for: language), limit: limit)
+    }
+    private static func candidates(for word: String, language: KeyboardLanguage, dictionary: DataSet, limit: Int) -> [String] {
         let key = normalized(word)
-        guard (2...24).contains(key.count), limit > 0 else { return [] }
-        let dictionary = data(for: language)
-        guard dictionary.ranks[key] == nil else { return [] }
+        guard (2...24).contains(key.count), limit > 0, dictionary.ranks[key] == nil else { return [] }
         let letters: [Character]
         switch language {
         case .english: letters = Array("abcdefghijklmnopqrstuvwxyz'-")

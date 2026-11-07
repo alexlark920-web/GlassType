@@ -9,16 +9,19 @@
   },
   "languages": {
     "en": {
-      "words": 30000,
-      "sha256": "1c61e9b534c94d10406c624751c3ecd730b60aee92c0b8d86199d255218ff9d1"
+      "words": 30028,
+      "supplemental": 28,
+      "sha256": "5afd72e3da819c94b9f6b61afa8f47ab37a56cc0b47ee0774328568c8cb70d12"
     },
     "ru": {
-      "words": 30000,
-      "sha256": "3fe36bc7f09a1f2d6c3f10107e9163903208bd0f3a35288bd17681c964b09158"
+      "words": 30067,
+      "supplemental": 67,
+      "sha256": "eca5bb13869b1628bef819e0c4b7daba24b15f1fe0897dc5d177db0552b9f9db"
     },
     "uk": {
-      "words": 27255,
-      "sha256": "afcadb6538449f3dc87b4911c15a75f3d9f0b1a05326c9b0d985f1e1a2efec37"
+      "words": 27317,
+      "supplemental": 62,
+      "sha256": "adf277b32574c293074923d2de63358dc0cc3c211fb5597c6638bc3bb96e7436"
     }
   }
 }

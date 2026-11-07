@@ -32,6 +32,7 @@ def main():
         actual = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
         if actual != expected:
             raise ValueError(f"Source changed: {name}: {actual} != {expected}")
+    supplements = json.loads(Path(__file__).with_name("lexicon_supplements.json").read_text())
     uk_dictionary = Dictionary.from_files(str(source / "uk_UA"))
     manifest = {"version": 1, "sources_git_blob_sha1": SOURCE_HASHES, "languages": {}}
     for language, alphabet in [("en", "a-z"), ("ru", "а-яё"), ("uk", "а-щьюяєіїґ")]:
@@ -46,9 +47,13 @@ def main():
             words.append(word); seen.add(word)
             if len(words) == 30000:
                 break
+        extras = [normalize(word) for word in supplements[language] if normalize(word) not in seen]
+        assert all(pattern.fullmatch(word) and 2 <= len(word) <= 24 for word in extras)
+        # Preserve the corpus ranks; explicitly reviewed modern terms extend it.
+        words.extend(dict.fromkeys(extras))
         data = ("\n".join(words) + "\n").encode()
         (output / ("lexicon_" + language + ".txt")).write_bytes(data)
-        manifest["languages"][language] = {"words": len(words), "sha256": hashlib.sha256(data).hexdigest()}
+        manifest["languages"][language] = {"words": len(words), "supplemental": len(extras), "sha256": hashlib.sha256(data).hexdigest()}
         print(language, len(words), len(data))
     for name in ["CC-BY-SA-4.0.txt", "MPL-1.1.txt", "README_uk_UA.txt"]:
         (output / name).write_bytes((source / name).read_bytes())

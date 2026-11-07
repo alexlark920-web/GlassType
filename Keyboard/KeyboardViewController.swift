@@ -354,7 +354,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var state = InputState()
     private let theme = KeyboardTheme.material
     private var settings = KeyboardSettings()
-    private let provider: any SuggestionProvider = LocalSuggestionProvider()
+    private let provider: any SuggestionProvider = LocalSuggestionProvider(cachedOnly: true)
     private let rows = UIStackView()
     private let keyPlane = KeyboardTouchSurface(frame: .zero)
     private var touchAdaptation = TouchCalibrationStorage.load()
@@ -728,7 +728,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private func prewarmLexicon() {
         let language = state.language
-        lexiconQueue.async { GlideDecoder.prepare(language: language) }
+        lexiconQueue.async { [weak self] in
+            GlideDecoder.prepare(language: language)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.state.language == language, self.view.window != nil else { return }
+                self.refreshSuggestions()
+            }
+        }
     }
     private func configureFeedback() {
         let style: UIImpactFeedbackGenerator.FeedbackStyle
@@ -1369,10 +1375,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         else {
             if let explicit = correctionEngine.replacement(for: word, language: state.language) { replacement = explicit }
             else {
+                guard let local = OfflineLexicon.preparedCheck(word, language: state.language), !local.known else { return false }
                 let checked = spelling.check(word, language: state.language)
-                let known = checked.known || OfflineLexicon.contains(word, language: state.language)
-                let offline = known ? [] : OfflineLexicon.correctionCandidates(for: word, language: state.language)
-                let candidates = Array(Set(offline + checked.candidates)).sorted()
+                let known = checked.known
+                let candidates = Array(Set(local.candidates + checked.candidates)).sorted()
                 guard let candidate = correctionEngine.replacement(for: word, language: state.language, candidates: candidates, isKnownWord: known) else { return false }
                 replacement = candidate
             }

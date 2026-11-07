@@ -76,7 +76,7 @@ final class KeyboardCoreTests: XCTestCase {
     }
     func testSuggestionsForEachLanguage() {
         let provider = LocalSuggestionProvider()
-        XCTAssertEqual(provider.suggestions(context: "say he", language: .english), ["hello", "help", "here"])
+        XCTAssertEqual(provider.suggestions(context: "say he", language: .english), ["here", "her", "hey"])
         XCTAssertTrue(provider.suggestions(context: "при", language: .russian).contains("привет"))
         XCTAssertTrue(provider.suggestions(context: "при", language: .ukrainian).contains("привіт"))
     }
@@ -89,7 +89,7 @@ final class KeyboardCoreTests: XCTestCase {
     func testSuggestionsAreBoundedAndCaseInsensitive() {
         let provider = LocalSuggestionProvider()
         XCTAssertLessThanOrEqual(provider.suggestions(context: "h", language: .english).count, 3)
-        XCTAssertEqual(provider.suggestions(context: "HE", language: .english), ["hello", "help", "here"])
+        XCTAssertEqual(provider.suggestions(context: "HE", language: .english), ["here", "her", "hey"])
         XCTAssertTrue(provider.suggestions(context: String(repeating: "a", count: 100_000), language: .english).isEmpty)
     }
     func testReplacementCountsCharactersNotUTF16Units() {

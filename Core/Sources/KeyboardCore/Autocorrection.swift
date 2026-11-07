@@ -34,8 +34,8 @@ public struct AutocorrectionEngine {
         if let explicit = typos[lowercase] {
             result = explicit
         } else {
-            guard lowercase.count >= 4 else { return nil }
-            let matches = Set(candidates.prefix(32).map { $0.lowercased() }.filter {
+            guard lowercase.count >= 4, candidates.count <= 8 else { return nil }
+            let matches = Set(candidates.map { $0.lowercased() }.filter {
                 $0 != lowercase && $0.allSatisfy(\.isLetter) && isNative($0, language: language) &&
                 Self.isSingleEdit(lowercase, $0)
             })
