@@ -53,7 +53,10 @@ final class EmojiCatalogTests: XCTestCase {
         let collapsed = EmojiVariants.collapsed(items)
         XCTAssertEqual(collapsed.count, Set(collapsed.map { EmojiVariants.base(of: $0.emoji) }).count)
         let handshakes = EmojiVariants.choices(for: "🤝", among: items)
-        XCTAssertTrue(handshakes.contains { $0.emoji.contains("🫱") && $0.emoji.contains("🫲") && $0.emoji.contains("‍") })
+        XCTAssertTrue(handshakes.contains {
+            let scalars = Set($0.emoji.unicodeScalars.map(\.value))
+            return scalars.contains(0x1FAF1) && scalars.contains(0x1FAF2)
+        })
         XCTAssertEqual(EmojiVariants.collapsed(handshakes).count, 1)
     }
 }
