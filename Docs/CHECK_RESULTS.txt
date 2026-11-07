@@ -17,5 +17,12 @@ unsigned device archive/IPA и упаковка исходников. Артеф
 Установка через SideStore и ручные проверки на iPhone 15 Pro, включая рендеринг Emoji 18.0,
 ещё не выполнялись.
 
-GlassType 1.11 (19) — изменения панели Emoji, локального поиска, мгновенного Backspace,
-пользовательских слов и адаптивной touch-модели ещё ожидают автоматической проверки CI.
+GlassType 1.11 (19) — GitHub Actions #24 завершился успешно:
+https://github.com/alexlark920-web/GlassType/actions/runs/42365886656
+
+Прошли Scripts/validate_project.py, XCTest пакета KeyboardCore, сборка generic iOS Simulator,
+unsigned device archive/IPA и упаковка versioned source archive. Артефакты:
+GlassType-unsigned-IPA (4,413,456 bytes) и GlassType-source-v1.11-build19 (2,368,637 bytes).
+
+Локально в Linux также проходит структурная проверка; Swift/Xcode недоступны. Ручные проверки
+emoji-поиска, подложек подсказок, Backspace и пользовательского словаря на iPhone не проводились.
