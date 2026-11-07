@@ -18,9 +18,10 @@ final class SymbolPageTests: XCTestCase {
     }
     func testNumbersAndSecondPageOfferDifferentCharacters() {
         XCTAssertEqual(SymbolPage.numbers.rows[0].joined(), "1234567890")
-        for symbol in ["[", "]", "{", "}", "\\", "€", "₴", "₽", "÷"] {
+        for symbol in ["[", "]", "{", "}", "\\", "÷"] {
             XCTAssertTrue(SymbolPage.extended.rows.flatMap { $0 }.contains(symbol))
         }
+        for symbol in ["€", "₴", "₽"] { XCTAssertFalse(SymbolPage.extended.rows.flatMap { $0 }.contains(symbol)) }
     }
     func testPageStateDoesNotChangeLanguageOrShift() {
         var state = InputState(language: .ukrainian)

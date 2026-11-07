@@ -26,7 +26,7 @@ extension KeyboardLanguage {
         switch self {
         case .english: return "$"
         case .russian: return "$"
-        case .ukrainian: return "₴"
+        case .ukrainian: return "$"
         }
     }
 }
