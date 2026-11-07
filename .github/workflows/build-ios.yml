@@ -25,7 +25,10 @@ jobs:
         run: unzip -o GlassType-1.1-update.zip
 
       - name: Show Xcode version
-        run: xcodebuild -version
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcodebuild -version
+          xcodebuild -showsdks
 
       - name: Validate project structure
         run: python3 Scripts/validate_project.py

@@ -1,0 +1,31 @@
+GlassType offline lexicons — data attribution
+
+English: 30,000 words. Russian: 30,000 words. Ukrainian: 27,255 words.
+Frequency order is preserved after normalization, alphabet/length filtering,
+deduplication and the Ukrainian spelling-validation step.
+These are statistical subtitle corpora, not exhaustive normative dictionaries.
+
+FrequencyWords / Hermit Dave (2016–2018), based on OpenSubtitles2018 / OPUS.
+Source: https://github.com/hermitdave/FrequencyWords
+Files: content/2018/{en,ru,uk}/{en,ru,uk}_50k.txt
+Original content and these adapted word lists: CC BY-SA 4.0.
+https://creativecommons.org/licenses/by-sa/4.0/
+The full legal code is included in CC-BY-SA-4.0.txt.
+The MIT license in the upstream repository applies to its code, not its data.
+Changes by GlassType contributors, 2026: lowercase/NFC punctuation normalization;
+2–24 characters; language alphabets; no mixed scripts or digits; English/Russian
+capped at 30,000; Ukrainian candidates validated with Hunspell-compatible lookup.
+No user input or network downloads are used at runtime.
+
+Ukrainian validation reference: LibreOffice Ukrainian dictionary 6.7.5,
+based on dict_uk / ВЕСУМ, oxt authors Andriy Rysin, 2007–2017.
+https://github.com/LibreOffice/dictionaries/tree/master/uk_UA
+https://github.com/brown-uk/dict_uk
+Licensed under MPL 1.1; see README_uk_UA.txt and MPL-1.1.txt.
+The full Hunspell data is a build-time validation source, not embedded in iOS.
+spylls 0.1.7 is used only for reproducible build-time validation.
+
+Original source Git blob hashes, output hashes and word counts are recorded in
+lexicon-manifest.json. Reproduction script: Scripts/build_lexicons.py in the
+open-source GlassType repository. Resource-specific licenses do not change the
+MIT license of the keyboard's original source code.

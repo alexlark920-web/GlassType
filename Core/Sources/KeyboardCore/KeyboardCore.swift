@@ -22,33 +22,39 @@ public struct InputState {
     public var language: KeyboardLanguage
     public private(set) var shift: ShiftState = .once
     public var symbols = false
+    public var symbolPage: SymbolPage = .numbers
     private var lastShift: TimeInterval?
+    private var automaticShift = true
     public init(language: KeyboardLanguage = .english) { self.language = language }
     public mutating func tapShift(at time: TimeInterval) {
+        automaticShift = false
         if let last = lastShift, time - last >= 0, time - last < 0.32 { shift = .locked; lastShift = nil }
         else { shift = shift == .off ? .once : .off; lastShift = time }
     }
     public mutating func inserted(_ text: String) -> String {
+        guard !symbols else { lastShift = nil; return text }
         let result = shift == .off ? text : text.uppercased()
-        if shift == .once { shift = .off }
+        if shift == .once { shift = .off; automaticShift = false }
         lastShift = nil
         return result
     }
     public mutating func nextLanguage(enabled: [KeyboardLanguage]) {
-        guard !enabled.isEmpty else { return }
-        let index = enabled.firstIndex(of: language) ?? -1
-        language = enabled[(index + 1) % enabled.count]
+        cycleLanguage(enabled: enabled, direction: .next)
+    }
+    public mutating func cycleLanguage(enabled: [KeyboardLanguage], direction: LanguageDirection) {
+        guard let first = enabled.first else { return }
+        guard let index = enabled.firstIndex(of: language) else { language = first; return }
+        let offset = direction == .next ? 1 : -1
+        language = enabled[(index + offset + enabled.count) % enabled.count]
     }
     public mutating func synchronize(context: String?, autoCapitalization: Bool) {
-        guard shift != .locked, autoCapitalization, let context else { return }
-
-        if context.isEmpty || context.hasSuffix("\n") ||
-            [". ", "! ", "? "].contains(where: { context.hasSuffix($0) }) {
-            shift = .once
-        }
+        guard shift != .locked, let context else { return }
+        let needed = autoCapitalization && SentenceCapitalization.shouldCapitalize(contextBeforeInput: context)
+        if needed && shift == .off { shift = .once; automaticShift = true }
+        else if !needed && automaticShift { shift = .off; automaticShift = false }
     }
-}
 
+}
 public protocol SuggestionProvider {
     func suggestions(context: String, language: KeyboardLanguage) -> [String]
 }

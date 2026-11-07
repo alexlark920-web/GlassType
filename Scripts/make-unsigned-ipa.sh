@@ -7,6 +7,10 @@ xcodebuild -project GlassType.xcodeproj -scheme GlassType -configuration Release
   CODE_SIGNING_ALLOWED=NO archive
 app='build/GlassType.xcarchive/Products/Applications/GlassType.app'
 test -d "$app/PlugIns/GlassTypeKeyboard.appex"
+for language in en ru uk; do
+  resource="$app/PlugIns/GlassTypeKeyboard.appex/KeyboardCore_KeyboardCore.bundle/lexicon_${language}.txt"
+  test -s "$resource" || { echo "Missing keyboard lexicon: $resource" >&2; exit 1; }
+done
 stage="$(mktemp -d "${TMPDIR:-/tmp}/glasstype-ipa.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 mkdir "$stage/Payload"

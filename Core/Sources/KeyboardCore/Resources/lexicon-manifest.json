@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "sources_git_blob_sha1": {
+    "en_50k.txt": "bbf5fa991058ff642732784b31af023f66462e1d",
+    "ru_50k.txt": "fa4412020b6409b90a45c1278d07e98812b544e2",
+    "uk_50k.txt": "b5c607e7fe06c4ea1f3456a1a41f35f005b0a236",
+    "uk_UA.dic": "ff848bbb610332bec2fa867f91d7489154c3585d",
+    "uk_UA.aff": "2a604054953b9997b1b7250427fb244736a1c66b"
+  },
+  "languages": {
+    "en": {
+      "words": 30000,
+      "sha256": "1c61e9b534c94d10406c624751c3ecd730b60aee92c0b8d86199d255218ff9d1"
+    },
+    "ru": {
+      "words": 30000,
+      "sha256": "3fe36bc7f09a1f2d6c3f10107e9163903208bd0f3a35288bd17681c964b09158"
+    },
+    "uk": {
+      "words": 27255,
+      "sha256": "afcadb6538449f3dc87b4911c15a75f3d9f0b1a05326c9b0d985f1e1a2efec37"
+    }
+  }
+}

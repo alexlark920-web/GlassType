@@ -1,15 +1,27 @@
 import UIKit
 
-/// Semantic colors follow explicit theme settings, system appearance and contrast.
-/// Thin material is a supported fallback; no unverified iOS 27 glass APIs.
+/// Neutral translucent caps share the system keyboard material underneath.
+/// Borders and restrained sheen are drawn by KeyButton, without per-key blur.
 struct KeyboardTheme {
     let key: UIColor
     let function: UIColor
+    let spacebar: UIColor
     let accent: UIColor
     let foreground: UIColor
     let radius: CGFloat
-    static let material = KeyboardTheme(key: .secondarySystemGroupedBackground,
-                                        function: .tertiarySystemFill,
+    private static let keycap = UIColor { traits in
+        let dark = traits.userInterfaceStyle == .dark
+        let contrast = traits.accessibilityContrast == .high
+        return UIColor(white: dark ? (contrast ? 0.34 : 0.28) : 0.96,
+                       alpha: contrast ? 0.96 : (dark ? 0.82 : 0.86))
+    }
+    private static let spacecap = UIColor { traits in
+        let dark = traits.userInterfaceStyle == .dark
+        let contrast = traits.accessibilityContrast == .high
+        return UIColor(white: dark ? (contrast ? 0.34 : 0.28) : 0.88,
+                       alpha: contrast ? 0.96 : (dark ? 0.82 : 0.90))
+    }
+    static let material = KeyboardTheme(key: keycap, function: keycap, spacebar: spacecap,
                                         accent: .systemIndigo,
-                                        foreground: .label, radius: 10)
+                                        foreground: .label, radius: 7.5)
 }

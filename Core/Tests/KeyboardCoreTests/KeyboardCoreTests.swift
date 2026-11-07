@@ -97,4 +97,21 @@ final class KeyboardCoreTests: XCTestCase {
         XCTAssertEqual(LocalSuggestionProvider.trailingWord(in: "cafe\u{301}"), "cafe\u{301}")
         XCTAssertEqual(LocalSuggestionProvider.trailingWord(in: "hello "), "")
     }
+    func testAutomaticShiftFollowsCursorSentencePosition() {
+        var state = InputState()
+        state.synchronize(context: "middle of word", autoCapitalization: true)
+        XCTAssertEqual(state.shift, .off)
+        state.synchronize(context: "Done! ", autoCapitalization: true)
+        XCTAssertEqual(state.inserted("я"), "Я")
+        state.synchronize(context: "New paragraph\n", autoCapitalization: true)
+        XCTAssertEqual(state.inserted("ї"), "Ї")
+    }
+    func testManualOneShotShiftSurvivesMidwordContextRefresh() {
+        var state = InputState()
+        _ = state.inserted("a")
+        state.tapShift(at: 10)
+        state.synchronize(context: "inside", autoCapitalization: true)
+        XCTAssertEqual(state.inserted("a"), "A")
+    }
+
 }

@@ -95,5 +95,17 @@ require((ROOT / 'Core/Package.swift').is_file(), 'Missing local Swift Package')
 require(len(list((ROOT / 'Core/Tests').rglob('*.swift'))) > 0, 'Missing XCTest sources')
 for path in [*ROOT.glob('App/*.swift'), *ROOT.glob('Keyboard/*.swift'), *ROOT.glob('Shared/*.swift'), *ROOT.glob('Core/Sources/**/*.swift')]:
     require(not re.search(r'\b(URLSession|NSURLConnection|NWConnection|WKWebView)\b|https?://', path.read_text()), f'Unexpected network API: {path}')
+import hashlib
+import json
+resources = ROOT / 'Core/Sources/KeyboardCore/Resources'
+manifest = json.loads((resources / 'lexicon-manifest.json').read_text())
+for language in ['en', 'ru', 'uk']:
+    data = (resources / f'lexicon_{language}.txt').read_bytes()
+    words = data.decode().splitlines()
+    require(len(words) == manifest['languages'][language]['words'], f'{language}: wrong word count')
+    require(len(words) >= 25000 and len(words) == len(set(words)), f'{language}: missing or duplicate words')
+    require(hashlib.sha256(data).hexdigest() == manifest['languages'][language]['sha256'], f'{language}: corpus changed')
+for name in ['Dictionary-Attribution.txt', 'CC-BY-SA-4.0.txt', 'MPL-1.1.txt']:
+    require((resources / name).is_file(), f'Missing license {name}')
 print(f'PASS: parsed Xcode project; {len(objects)} objects; 2 targets; source membership, local package, embed phase, plists, entitlements, privacy manifests and scheme references.')
 print('LIMIT: structural checks only. Swift tests, type checking, Xcode build, signing and device behavior have NOT been verified.')
