@@ -120,7 +120,7 @@ Git blob hashes. Scripts/package_update.py включает ресурсы и н
 
 * Core: KeyboardGeometry.swift, TouchRecognition.swift, TouchAdaptation.swift,
   GlideActivation.swift — новые модули.
-* Core: GlideDecoder.swift, GlideVocabulary.swift, OfflineLexicon.swift,
+* Core: KeyboardCore.swift, GlideDecoder.swift, GlideVocabulary.swift, OfflineLexicon.swift,
   Autocorrection.swift, Package.swift; Resources/* — движок и реальные словари.
 * Keyboard: KeyboardTouchSurface.swift, GlideTouchRecognizer.swift — новые;
   KeyboardViewController.swift — подключение, обучение, свайп, групповые настройки.
@@ -132,6 +132,10 @@ Git blob hashes. Scripts/package_update.py включает ресурсы и н
   включение UIKit-файлов и версия 1.6.
 * Scripts/build_lexicons.py, package_update.py, make-unsigned-ipa.sh,
   validate_project.py; .github/workflows/build-ios.yml; README/Docs.
+
+Фактическая проверка 1.6 build 13: Xcode 26.3, SDK 26.2, 124 теста без ошибок,
+успешные generic simulator build и device archive; ресурсы расширения проверены.
+[Actions #15](https://github.com/alexlark920-web/GlassType/actions/runs/42335346508).
 
 Фактические результаты проверки опубликованы отдельно в CHECK_RESULTS.txt и
 в логе GitHub Actions соответствующего коммита. Сборка не подтверждает работу
