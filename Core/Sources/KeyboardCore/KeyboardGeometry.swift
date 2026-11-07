@@ -85,9 +85,19 @@ public struct KeyboardGeometry {
     public func cellIndex(at point: CGPoint) -> Int? {
         guard point.x.isFinite, point.y.isFinite, point.x >= bounds.minX, point.x <= bounds.maxX,
               point.y >= bounds.minY, point.y <= bounds.maxY, !keys.isEmpty else { return nil }
-        let row = min(3, Int((point.y - bounds.minY) / pitch.height))
-        for key in keys where key.row == row {
-            if point.x >= key.touchFrame.minX && (point.x < key.touchFrame.maxX || key.touchFrame.maxX == bounds.maxX) { return key.index }
+        // Compare the same stored boundary expressions used by layout. Division
+        // can turn an exact row edge into 2.9999999999999996 on fractional sizes.
+        let row: Int
+        if point.y < bounds.minY + pitch.height { row = 0 }
+        else if point.y < bounds.minY + 2 * pitch.height { row = 1 }
+        else if point.y < bounds.minY + 3 * pitch.height { row = 2 }
+        else { row = 3 }
+        for index in keys.indices where keys[index].row == row {
+            let next = index + 1
+            // The next cell's start is the canonical shared edge; reconstructing
+            // it as origin + width can introduce a one-ULP gap or overlap.
+            let right = next < keys.count && keys[next].row == row ? keys[next].touchFrame.minX : bounds.maxX
+            if point.x < right || right == bounds.maxX { return index }
         }
         return nil
     }

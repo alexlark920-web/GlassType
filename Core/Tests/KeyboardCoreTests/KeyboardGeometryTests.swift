@@ -5,8 +5,8 @@ import XCTest
 
 final class KeyboardGeometryTests: XCTestCase {
     private let sizes: [CGSize] = [CGSize(width: 312, height: 220), CGSize(width: 367, height: 225),
-        CGSize(width: 385, height: 225), CGSize(width: 422, height: 240), CGSize(width: 732, height: 155),
-        CGSize(width: 750, height: 155), CGSize(width: 844, height: 165)]
+        CGSize(width: 385, height: 225), CGSize(width: 393, height: 229.7), CGSize(width: 422, height: 240), CGSize(width: 732, height: 155),
+        CGSize(width: 734, height: 155), CGSize(width: 750, height: 155), CGSize(width: 844, height: 165)]
     func testAllLayoutsAndSizesKeepCapsInsideTheirSlots() {
         for size in sizes {
             for language in KeyboardLanguage.allCases {
@@ -69,4 +69,29 @@ final class KeyboardGeometryTests: XCTestCase {
         XCTAssertEqual(compact.keys.map(\.touchFrame), large.keys.map(\.touchFrame))
         XCTAssertEqual(compact.keys.map(\.center), large.keys.map(\.center))
     }
+    func testFractionalDimensionsUseCanonicalRowAndColumnBoundaries() {
+        // Includes the actual +5% portrait geometry that exposes division drift.
+        let heights: [CGFloat] = [229.7, 224.7, 234.7275, 185.3]
+        for height in heights {
+            for origin in [CGPoint.zero, CGPoint(x: 1.1, y: 2.2)] {
+                for language in KeyboardLanguage.allCases {
+                    let geometry = KeyboardGeometry.make(bounds: CGRect(x: origin.x, y: origin.y, width: 393.3333, height: height), language: language)
+                    for key in geometry.keys {
+                        let point = CGPoint(x: key.touchFrame.minX, y: key.center.y)
+                        XCTAssertEqual(geometry.cellIndex(at: point), key.index)
+                    }
+                    for row in 1...3 {
+                        let boundary = geometry.keys.first { $0.row == row }!.touchFrame.minY
+                        let point = CGPoint(x: geometry.bounds.midX, y: boundary)
+                        XCTAssertEqual(geometry.keys[geometry.cellIndex(at: point)!].row, row)
+                        XCTAssertEqual(geometry.keys[geometry.cellIndex(at: CGPoint(x: point.x, y: boundary - 0.000001))!].row, row - 1)
+                    }
+                    let point = CGPoint(x: geometry.bounds.midX, y: geometry.bounds.minY + 3 * geometry.pitch.height)
+                    let result = TouchRecognizer(geometry: geometry).resolve(point)!
+                    XCTAssertEqual(geometry.keys[result.first.keyIndex].role, .space)
+                }
+            }
+        }
+    }
+
 }
