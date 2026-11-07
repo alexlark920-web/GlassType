@@ -19,7 +19,9 @@ final class KeyboardTextService {
 
     func replacement(for word: String, language: KeyboardLanguage,
                      personalLexicon: PersonalLexicon,
-                     includeProfanity: Bool = false) -> String? {
+                     includeProfanity: Bool = false,
+                     languageModel: PersonalNGramModel = PersonalNGramModel(),
+                     previousContext: String = "") -> String? {
         let needsDictionary = correctionPipeline.needsDictionaryChecks(for: word, language: language,
                                                                        personalLexicon: personalLexicon)
         let local = needsDictionary ? OfflineLexicon.preparedCheck(word, language: language, includeProfanity: includeProfanity) : nil
@@ -36,7 +38,9 @@ final class KeyboardTextService {
                                               personalLexicon: personalLexicon,
                                               offlineCheck: local,
                                               systemWordIsKnown: system.known,
-                                              systemCandidates: system.candidates)
+                                              systemCandidates: system.candidates,
+                                              languageModel: languageModel,
+                                              previousContext: previousContext)
         guard includeProfanity || replacement.map({ !SupplementalVocabulary.isProfanity($0, language: language) }) == true else { return nil }
         return replacement
     }

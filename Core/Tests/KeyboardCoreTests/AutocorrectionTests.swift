@@ -56,6 +56,18 @@ final class AutocorrectionTests: XCTestCase {
             .init("hello", frequencyRank: 10), .init("help", frequencyRank: 10)
         ]))
     }
+    func testLocalLanguageProfileCanRerankAnOtherwiseDominantCorrection() {
+        let candidates = [AutocorrectionEngine.Candidate("help", frequencyRank: 1),
+                          AutocorrectionEngine.Candidate("hello", frequencyRank: 10_000)]
+        XCTAssertEqual(engine.rankedReplacement(for: "hellp", language: .english, candidates: candidates), "help")
+
+        var model = PersonalNGramModel()
+        for _ in 0..<8 { model.observe(context: "say", nextWord: "hello", language: .english) }
+        XCTAssertEqual(engine.rankedReplacement(for: "hellp", language: .english, candidates: candidates,
+                                                 languageModel: model, previousContext: "say"), "hello")
+        XCTAssertEqual(engine.rankedReplacement(for: "hellp", language: .russian, candidates: candidates,
+                                                 languageModel: model, previousContext: "say"), "help")
+    }
     func testRankedCorrectionUsesActualOfflineCorporaForAllLanguages() {
         for (typo, expected, language) in [("keybaord", "keyboard", KeyboardLanguage.english),
                                            ("клавиатруа", "клавиатура", .russian), ("клавіатруа", "клавіатура", .ukrainian)] {

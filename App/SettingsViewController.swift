@@ -18,14 +18,14 @@ final class SettingsViewController: UITableViewController {
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int { 4 }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { [1, 19, 3, 1][section] }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { [1, 23, 3, 1][section] }
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         ["Подключение", "Настройки", "Языки — минимум один", "Проверка ввода"].indices.contains(section)
             ? t(["Подключение", "Настройки", "Языки — минимум один", "Проверка ввода"][section]) : nil
     }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        if section == 0 { return t("Добавьте GlassType в настройках клавиатуры iOS. Полный доступ нужен для общих настроек приложения, синхронизации личного словаря и динамической кнопки вставки после копирования. Без него ввод работает, а системная кнопка вставки остаётся доступной постоянно.") }
-        if section == 1 { return t("Удерживайте глобус или эмодзи-клавишу для настроек клавиатуры. Без полного доступа параметры и словарь хранятся отдельно в расширении. Адаптация сохраняет только числовые агрегаты; текст и история касаний не записываются.") }
+        if section == 0 { return t("Добавьте GlassType в настройках клавиатуры iOS. Полный доступ нужен только для общих настроек приложения и синхронизации личного словаря. Ввод, автозамена, словарные подсказки и локальная адаптация работают в расширении без него.") }
+        if section == 1 { return t("Удерживайте глобус или эмодзи-клавишу для настроек клавиатуры. Без полного доступа параметры и словарь хранятся отдельно в расширении. Подсказки используют только локальные агрегированные счётчики; текст и история касаний не записываются.") }
         return nil
     }
 
@@ -36,7 +36,7 @@ final class SettingsViewController: UITableViewController {
             cell.accessoryType = .disclosureIndicator
         }
         if indexPath.section == 1 {
-            let labels = ["Тема", "Подсказки", "Заглавная в начале предложения", "Виброотклик", "Символы удержанием", "Метки на клавишах", "Задержка удержания", "Автозамена", "Компактные клавиши", "Отображение символа при нажатии", "Двойной пробел → точка", "Свайп удаления слова", "Свайп-ввод слов", "Адаптация касаний", "Показать зоны касаний", "Лицензии словарей", "Заменить глобус на эмодзи", "Разрешить нецензурные слова в подсказках и автозамене", "Язык интерфейса"]
+            let labels = ["Тема", "Подсказки", "Заглавная в начале предложения", "Виброотклик", "Символы удержанием", "Метки на клавишах", "Задержка удержания", "Автозамена", "Компактные клавиши", "Отображение символа при нажатии", "Двойной пробел → точка", "Свайп удаления слова", "Свайп-ввод слов", "Адаптация касаний", "Показать зоны касаний", "Лицензии словарей", "Заменить глобус на эмодзи", "Разрешить нецензурные слова в подсказках и автозамене", "Высота клавиатуры", "Визуальная ширина клавиш", "Предсказание следующего слова", "Локальное обучение подсказок", "Язык интерфейса"]
             guard labels.indices.contains(indexPath.row) else { return cell }
             cell.textLabel?.text = t(labels[indexPath.row])
             cell.textLabel?.numberOfLines = indexPath.row == 17 ? 3 : ((indexPath.row == 2 || indexPath.row >= 9) ? 2 : 1)
@@ -58,12 +58,27 @@ final class SettingsViewController: UITableViewController {
                 control.selectedSegmentIndex = settings.holdDelay < 0.325 ? 0 : (settings.holdDelay < 0.5 ? 1 : 2)
                 control.addTarget(self, action: #selector(delayChanged(_:)), for: .valueChanged)
                 cell.accessoryView = control
-            case 18:
+            case 22:
                 let control = UISegmentedControl(items: InterfaceLanguage.allCases.map(\.shortTitle))
                 control.selectedSegmentIndex = InterfaceLanguage.allCases.firstIndex(of: settings.interfaceLanguage) ?? 0
                 control.accessibilityLabel = t("Язык интерфейса")
                 control.addTarget(self, action: #selector(interfaceLanguageChanged(_:)), for: .valueChanged)
                 cell.accessoryView = control
+            case 18, 19:
+                let slider = UISlider(frame: CGRect(x: 0, y: 0, width: 132, height: 32))
+                slider.tag = indexPath.row
+                if indexPath.row == 18 {
+                    slider.minimumValue = 0.92; slider.maximumValue = 1.10
+                    slider.value = Float(settings.keyboardHeightScale)
+                } else {
+                    slider.minimumValue = 0.84; slider.maximumValue = 1.12
+                    slider.value = Float(settings.visualKeyWidthScale)
+                }
+                slider.accessibilityLabel = t(labels[indexPath.row])
+                slider.accessibilityValue = "\(Int((slider.value * 100).rounded()))%"
+                slider.addTarget(self, action: #selector(sizeChanged(_:)), for: .valueChanged)
+                cell.detailTextLabel?.text = "\(Int((slider.value * 100).rounded()))%"
+                cell.accessoryView = slider
             default:
                 let control = UISwitch(); control.tag = indexPath.row
                 switch indexPath.row {
@@ -80,6 +95,8 @@ final class SettingsViewController: UITableViewController {
                 case 14: control.isOn = settings.debugTouchZones
                 case 16: control.isOn = settings.emojiKeyEnabled
                 case 17: control.isOn = settings.allowProfanitySuggestions
+                case 20: control.isOn = settings.nextWordPrediction
+                case 21: control.isOn = settings.personalizationEnabled
                 default: control.isOn = settings.symbolHints
                 }
                 control.addTarget(self, action: #selector(toggle(_:)), for: .valueChanged)
@@ -129,6 +146,16 @@ final class SettingsViewController: UITableViewController {
         settings.interfaceLanguage = InterfaceLanguage.allCases[control.selectedSegmentIndex]
         settings.save(); tableView.reloadData()
     }
+    @objc private func sizeChanged(_ control: UISlider) {
+        let value = Double(control.value)
+        if control.tag == 18 { settings.keyboardHeightScale = KeyboardSizing.heightScale(value) }
+        else { settings.visualKeyWidthScale = KeyboardSizing.visualWidthScale(value) }
+        control.accessibilityValue = "\(Int((value * 100).rounded()))%"
+        if let cell = tableView.cellForRow(at: IndexPath(row: control.tag, section: 1)) {
+            cell.detailTextLabel?.text = control.accessibilityValue
+        }
+        settings.save()
+    }
     @objc private func toggle(_ control: UISwitch) {
         switch control.tag {
         case 1: settings.suggestions = control.isOn
@@ -144,6 +171,8 @@ final class SettingsViewController: UITableViewController {
         case 14: settings.debugTouchZones = control.isOn
         case 16: settings.emojiKeyEnabled = control.isOn
         case 17: settings.allowProfanitySuggestions = control.isOn
+        case 20: settings.nextWordPrediction = control.isOn
+        case 21: settings.personalizationEnabled = control.isOn
         default: settings.symbolHints = control.isOn
         }
         settings.save()

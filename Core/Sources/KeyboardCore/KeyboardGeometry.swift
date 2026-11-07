@@ -8,6 +8,21 @@ public enum KeyboardKeyRole: Equatable {
     public var character: String? { if case let .character(value) = self { return value }; return nil }
 }
 
+/// User-adjustable sizing stays inside ranges that keep the four-row grid
+/// inside the extension's self-sizing surface. Width changes affect the visible
+/// caps only; every key keeps its original non-overlapping touch slot.
+public enum KeyboardSizing {
+    public static func heightScale(_ value: Double) -> Double {
+        value.isFinite ? min(1.10, max(0.92, value)) : 1
+    }
+    public static func visualWidthScale(_ value: Double) -> Double {
+        value.isFinite ? min(1.12, max(0.84, value)) : 1
+    }
+    public static func height(base: CGFloat, scale: Double, hasToolbar: Bool, bottomInset: CGFloat) -> CGFloat {
+        max(132, base * heightScale(scale) - (hasToolbar ? 0 : 32) + max(0, bottomInset))
+    }
+}
+
 /// Immutable layout shared by UIKit, tap recognition, previews and glide input.
 /// `slotFrame` positions a view; `visualFrame` draws its cap; `touchFrame` fills
 /// gaps/row margins. None of these depends on the learned touch offset.
@@ -30,7 +45,8 @@ public struct KeyboardGeometry {
     public static func make(bounds: CGRect, language: KeyboardLanguage,
                             symbolPage: SymbolPage? = nil, compact: Bool = true,
                             needsSystemKey: Bool = false, customRows: [[String]]? = nil,
-                            thirdRowUsesModeSwitch: Bool = false) -> KeyboardGeometry {
+                            thirdRowUsesModeSwitch: Bool = false,
+                            visualWidthScale: CGFloat = 1) -> KeyboardGeometry {
         guard [bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height].allSatisfy({ $0.isFinite }),
               bounds.width >= 80, bounds.height >= 80 else {
             return KeyboardGeometry(bounds: .zero, language: language, keys: [], pitch: .zero)
@@ -42,22 +58,27 @@ public struct KeyboardGeometry {
         let columns = max(rows[0].count, max(rows[1].count, rows[2].count + 2))
         let margin: CGFloat = 4, bottomMargin: CGFloat = 5
         let contentWidth = bounds.width - margin * 2
-        let unit = contentWidth / CGFloat(columns), height = (bounds.height - bottomMargin) / 4
+        let height = (bounds.height - bottomMargin) / 4
         var result: [KeyboardKeyGeometry] = []
         result.reserveCapacity(rows.reduce(0) { $0 + $1.count } + 9)
-        func appendRow(_ roles: [KeyboardKeyRole], weights: [CGFloat], row: Int, inset: CGFloat = 0) {
+        func appendRow(_ roles: [KeyboardKeyRole], weights: [CGFloat], row: Int) {
             let total = weights.reduce(0, +)
-            let scale = (contentWidth - inset * 2) / total
-            var x = bounds.minX + margin + inset
+            let scale = contentWidth / total
+            var x = bounds.minX + margin
             for position in roles.indices {
-                let end = position == roles.count - 1 ? bounds.maxX - margin - inset : x + weights[position] * scale
+                let end = position == roles.count - 1 ? bounds.maxX - margin : x + weights[position] * scale
                 let slot = CGRect(x: x, y: bounds.minY + CGFloat(row) * height, width: end - x, height: height)
                 let h: CGFloat = compact ? min(3.4, max(2.2, slot.width * 0.09)) : 3
                 let v: CGFloat = compact ? (height >= 42 ? 5 : 3.5) : 3.5
                 let touchLeft = position == 0 ? bounds.minX : x
                 let touchRight = position == roles.count - 1 ? bounds.maxX : end
+                let safeScale = CGFloat(KeyboardSizing.visualWidthScale(Double(visualWidthScale)))
+                let baseVisual = slot.insetBy(dx: min(h, slot.width * 0.2), dy: min(v, height * 0.2))
+                let visualWidth = min(max(0, slot.width - 4.4), max(0, baseVisual.width * safeScale))
+                let visual = CGRect(x: slot.midX - visualWidth / 2, y: baseVisual.minY,
+                                    width: visualWidth, height: baseVisual.height)
                 result.append(KeyboardKeyGeometry(index: result.count, row: row, role: roles[position], slotFrame: slot,
-                    visualFrame: slot.insetBy(dx: min(h, slot.width * 0.2), dy: min(v, height * 0.2)),
+                    visualFrame: visual,
                     touchFrame: CGRect(x: touchLeft, y: slot.minY, width: touchRight - touchLeft, height: height + (row == 3 ? bottomMargin : 0))))
                 x = end
             }
@@ -69,10 +90,9 @@ public struct KeyboardGeometry {
                 appendRow([thirdRowUsesModeSwitch ? .modeSwitch : .shift] + characters + [.backspace],
                           weights: [functionWeight] + Array(repeating: 1, count: characters.count) + [functionWeight], row: row)
             } else {
-                // EN's second row is offset by half a pitch; Cyrillic layouts
-                // get the matching half-pitch when their row is one key shorter.
-                let inset = (contentWidth - CGFloat(characters.count) * unit) / 2
-                appendRow(characters, weights: Array(repeating: 1, count: characters.count), row: row, inset: inset)
+                // Each alphabet row fills the same horizontal span. Layouts
+                // with fewer keys distribute the extra width across those keys.
+                appendRow(characters, weights: Array(repeating: 1, count: characters.count), row: row)
             }
         }
         var bottom: [KeyboardKeyRole] = [.modeSwitch, .language]
@@ -81,7 +101,8 @@ public struct KeyboardGeometry {
         bottom += [.character(","), .space, .character("."), .enter]
         weights += [0.85, 3.6, 0.85, 1.35]
         appendRow(bottom, weights: weights, row: 3)
-        return KeyboardGeometry(bounds: bounds, language: language, keys: result, pitch: CGSize(width: unit, height: height))
+        return KeyboardGeometry(bounds: bounds, language: language, keys: result,
+                                pitch: CGSize(width: contentWidth / CGFloat(columns), height: height))
     }
 
     /// Half-open cells have one owner, including exact shared edges. The outer

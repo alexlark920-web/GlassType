@@ -9,6 +9,14 @@ final class KeyboardTouchSurface: UIView {
     var customRows: [[String]]?
     var thirdRowUsesModeSwitch = false
     var compact = true
+    var visualWidthScale: CGFloat = 1 {
+        didSet {
+            let safeValue = CGFloat(KeyboardSizing.visualWidthScale(Double(visualWidthScale)))
+            guard safeValue != visualWidthScale else { return }
+            visualWidthScale = safeValue
+            invalidateGeometry()
+        }
+    }
     var needsSystemKey = false
     var keyViews: [UIButton] = []
     var didLayoutKey: ((UIButton, KeyboardKeyGeometry) -> Void)?
@@ -25,6 +33,7 @@ final class KeyboardTouchSurface: UIView {
     private var previousBounds: CGRect = .null
     private let debug = TouchZoneOverlay()
     private var glassContainer: UIVisualEffectView?
+    private var activeTextTouches = Set<ObjectIdentifier>()
     var showsDebugZones = false { didSet { updateDebug() } }
 
     override init(frame: CGRect) {
@@ -43,6 +52,10 @@ final class KeyboardTouchSurface: UIView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func addKey(_ button: UIButton) { (glassContainer?.contentView ?? self).addSubview(button) }
+    var hasActiveTextContacts: Bool { !activeTextTouches.isEmpty }
+    func ownsTextContact(_ touch: UITouch) -> Bool { activeTextTouches.contains(ObjectIdentifier(touch)) }
+    func beginTextContact(_ touch: UITouch) { activeTextTouches.insert(ObjectIdentifier(touch)) }
+    func finishTextContact(_ identifier: ObjectIdentifier) { activeTextTouches.remove(identifier) }
     func invalidateGeometry() { revision &+= 1; resetPresses(); previousBounds = .null; setNeedsLayout() }
     func setConfiguration(_ value: TouchRecognitionConfiguration) {
         if value.offsetX != configuration.offsetX || value.offsetY != configuration.offsetY ||
@@ -61,7 +74,8 @@ final class KeyboardTouchSurface: UIView {
         previousBounds = bounds
         let geometry = KeyboardGeometry.make(bounds: bounds, language: language, symbolPage: symbolPage,
                                               compact: compact, needsSystemKey: needsSystemKey,
-                                              customRows: customRows, thirdRowUsesModeSwitch: thirdRowUsesModeSwitch)
+                                              customRows: customRows, thirdRowUsesModeSwitch: thirdRowUsesModeSwitch,
+                                              visualWidthScale: visualWidthScale)
         guard geometry.keys.count == keyViews.count else { recognizer = nil; return }
         recognizer = TouchRecognizer(geometry: geometry, configuration: configuration)
         presses = Array(repeating: 0, count: keyViews.count)

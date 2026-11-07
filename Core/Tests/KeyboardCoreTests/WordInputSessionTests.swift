@@ -86,6 +86,20 @@ final class WordInputSessionTests: XCTestCase {
         XCTAssertFalse(sequence.finish(token: fresh, in: context("new ", document: "B")))
         XCTAssertFalse(sequence.isBusy)
     }
+    func testBackspaceCanCancelPendingDecodeAndDrainOtherContactsImmediately() {
+        var sequence = PendingInputSequence<String>()
+        let token = sequence.begin(in: context("before "))
+        sequence.enqueue("typed-a")
+        sequence.enqueue("stale-glide")
+        sequence.enqueue("typed-b")
+        sequence.invalidateWorkPreservingCommands()
+        sequence.removeQueued { $0 == "stale-glide" }
+        XCTAssertFalse(sequence.isBusy)
+        XCTAssertEqual(sequence.next(), "typed-a")
+        XCTAssertEqual(sequence.next(), "typed-b")
+        XCTAssertNil(sequence.next())
+        XCTAssertFalse(sequence.finish(token: token, in: context("before ")))
+    }
     func testLanguageSelectionDeduplicatesAndKeepsAtLeastOneLanguage() {
         XCTAssertEqual(EnabledKeyboardLanguages.normalized([]), [.english])
         XCTAssertEqual(EnabledKeyboardLanguages.normalized([.russian, .russian, .english]), [.english, .russian])

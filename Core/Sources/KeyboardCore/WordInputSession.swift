@@ -79,6 +79,19 @@ public struct PendingInputSequence<Command> {
         serial &+= 1; token = nil; context = nil
         commands.removeAll(keepingCapacity: true); head = 0
     }
+
+    /// Invalidate an in-flight worker but retain input events that arrived
+    /// while it ran. The main-thread owner can drain those events immediately.
+    public mutating func invalidateWorkPreservingCommands() {
+        serial &+= 1; token = nil; context = nil
+    }
+
+    /// Remove stale deferred work without disturbing the order of live input.
+    public mutating func removeQueued(where shouldRemove: (Command) -> Bool) {
+        guard head < commands.count else { return }
+        commands = Array(commands[head...].filter { !shouldRemove($0) })
+        head = 0
+    }
 }
 
 public enum EnabledKeyboardLanguages {

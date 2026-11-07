@@ -45,15 +45,29 @@ final class KeyboardGeometryTests: XCTestCase {
             }
         }
     }
-    func testRowsUseSamePitchAndCorrectHalfKeyIndent() {
-        for language in KeyboardLanguage.allCases {
-            let layout = KeyboardGeometry.make(bounds: CGRect(x: 5, y: 7, width: 385, height: 220), language: language)
-            let first = layout.keys.first { $0.row == 0 }!
-            let second = layout.keys.first { $0.row == 1 }!
-            XCTAssertEqual(second.slotFrame.minX - first.slotFrame.minX, layout.pitch.width / 2, accuracy: 0.001)
-            XCTAssertEqual(first.slotFrame.width, second.slotFrame.width, accuracy: 0.001)
-            let third = layout.keys.first { $0.row == 2 && $0.role.character != nil }!
-            XCTAssertEqual(third.slotFrame.width, layout.pitch.width, accuracy: 0.001)
+    func testAllRowsFillSameHorizontalSpanAndKeepEqualCapsWithinEachAlphabetRow() {
+        for size in sizes {
+            for language in KeyboardLanguage.allCases {
+                for page in [SymbolPage.numbers, .extended] {
+                    let layout = KeyboardGeometry.make(bounds: CGRect(origin: CGPoint(x: 5, y: 7), size: size),
+                                                       language: language, symbolPage: page)
+                    for row in 0..<4 {
+                        let keys = layout.keys.filter { $0.row == row }
+                        XCTAssertEqual(keys.first!.slotFrame.minX, CGFloat(9), accuracy: 0.001)
+                        XCTAssertEqual(keys.last!.slotFrame.maxX, size.width + 1, accuracy: 0.001)
+                    }
+                }
+                let layout = KeyboardGeometry.make(bounds: CGRect(x: 5, y: 7, width: size.width, height: size.height), language: language)
+                for row in 0..<4 {
+                    let keys = layout.keys.filter { $0.row == row }
+                    XCTAssertEqual(keys.first!.slotFrame.minX, CGFloat(9), accuracy: 0.001)
+                    XCTAssertEqual(keys.last!.slotFrame.maxX, size.width + 1, accuracy: 0.001)
+                }
+                for row in 0..<2 {
+                    let keys = layout.keys.filter { $0.row == row }
+                    XCTAssertTrue(keys.dropFirst().allSatisfy { abs($0.slotFrame.width - keys[0].slotFrame.width) < 0.001 })
+                }
+            }
         }
     }
     func testGapsMarginsAndOuterEdgesHaveOneOwner() {
@@ -85,6 +99,36 @@ final class KeyboardGeometryTests: XCTestCase {
         let large = KeyboardGeometry.make(bounds: compact.bounds, language: .russian, compact: false)
         XCTAssertEqual(compact.keys.map(\.touchFrame), large.keys.map(\.touchFrame))
         XCTAssertEqual(compact.keys.map(\.center), large.keys.map(\.center))
+    }
+    func testVisualWidthSliderNeverChangesTouchGeometryOrCreatesOverlaps() {
+        let bounds = CGRect(x: 0, y: 0, width: 320, height: 220)
+        let base = KeyboardGeometry.make(bounds: bounds, language: .english)
+        let narrow = KeyboardGeometry.make(bounds: bounds, language: .english, visualWidthScale: 0.84)
+        let wide = KeyboardGeometry.make(bounds: bounds, language: .english, visualWidthScale: 1.12)
+        XCTAssertEqual(base.keys.map(\.touchFrame), narrow.keys.map(\.touchFrame))
+        XCTAssertEqual(base.keys.map(\.touchFrame), wide.keys.map(\.touchFrame))
+        XCTAssertTrue(zip(narrow.keys, base.keys).allSatisfy { $0.0.visualFrame.width < $0.1.visualFrame.width })
+        XCTAssertTrue(zip(wide.keys, base.keys).allSatisfy { $0.0.visualFrame.width >= $0.1.visualFrame.width })
+        for model in [narrow, wide] {
+            for row in 0..<4 {
+                let keys = model.keys.filter { $0.row == row }
+                for pair in zip(keys, keys.dropFirst()) {
+                    XCTAssertLessThanOrEqual(pair.0.visualFrame.maxX, pair.1.visualFrame.minX + 0.001)
+                }
+            }
+        }
+    }
+    func testKeyboardHeightSliderStaysInsideSafeRangeInBothOrientations() {
+        for base in [CGFloat(188), CGFloat(254)] {
+            let minimum = KeyboardSizing.height(base: base * 1.05, scale: 0.92, hasToolbar: false, bottomInset: 0)
+            let defaultHeight = KeyboardSizing.height(base: base * 1.05, scale: 1, hasToolbar: false, bottomInset: 0)
+            let maximum = KeyboardSizing.height(base: base * 1.05, scale: 1.10, hasToolbar: true, bottomInset: 0)
+            XCTAssertGreaterThanOrEqual(minimum, 132)
+            XCTAssertLessThan(minimum, defaultHeight)
+            XCTAssertLessThan(defaultHeight, maximum)
+        }
+        XCTAssertEqual(KeyboardSizing.heightScale(.infinity), 1)
+        XCTAssertEqual(KeyboardSizing.visualWidthScale(.nan), 1)
     }
     func testFractionalDimensionsUseCanonicalRowAndColumnBoundaries() {
         // Includes the actual +5% portrait geometry that exposes division drift.

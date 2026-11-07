@@ -15,7 +15,9 @@ public struct AutocorrectionEngine {
     /// Unlike the unique-candidate API below, this can choose a dominant local
     /// word from several dictionary guesses. Near ties deliberately stay intact.
     public func rankedReplacement(for word: String, language: KeyboardLanguage,
-                                  candidates: [Candidate], isKnownWord: Bool = false) -> String? {
+                                  candidates: [Candidate], isKnownWord: Bool = false,
+                                  languageModel: PersonalNGramModel = PersonalNGramModel(),
+                                  previousContext: String = "") -> String? {
         guard !isKnownWord else { return nil }
         if let explicit = replacement(for: word, language: language) { return explicit }
         let lower = word.lowercased()
@@ -30,12 +32,19 @@ public struct AutocorrectionEngine {
                 if let rank, rank < (existing.frequencyRank ?? Int.max) { matches[text] = Candidate(text, frequencyRank: rank) }
             } else { matches[text] = Candidate(text, frequencyRank: rank) }
         }
+        let contextualScores = matches.keys.map {
+            ($0, languageModel.score($0, after: previousContext, language: language))
+        }
+        let weakestContextScore = contextualScores.map { $0.1 }.min() ?? 0
+        let contextScores = Dictionary(uniqueKeysWithValues: contextualScores)
         var ranked: [(word: String, score: Double)] = []
         for (text, candidate) in matches {
             let prior: Double
             if let rank = candidate.frequencyRank { prior = 0.15 * log(Double(rank) + 16.0) }
             else { prior = 1.35 }
-            let score = editCost(lower, text, language: language) + prior
+            let contextualAdvantage = max(0, (contextScores[text] ?? weakestContextScore) - weakestContextScore)
+            let personalizationBonus = min(1.4, contextualAdvantage * 0.5)
+            let score = editCost(lower, text, language: language) + prior - personalizationBonus
             ranked.append((word: text, score: score))
         }
         ranked.sort { left, right in
@@ -169,14 +178,17 @@ public struct AutocorrectionPipeline {
                             personalLexicon: PersonalLexicon,
                             offlineCheck: OfflineLexicon.SpellingCheck?,
                             systemWordIsKnown: Bool = false,
-                            systemCandidates: [String] = []) -> String? {
+                            systemCandidates: [String] = [],
+                            languageModel: PersonalNGramModel = PersonalNGramModel(),
+                            previousContext: String = "") -> String? {
         guard !personalLexicon.excludes(word), !personalLexicon.containsKnownWord(word) else { return nil }
         if let personal = personalLexicon.replacement(for: word) { return personal }
         if let explicit = engine.replacement(for: word, language: language) { return explicit }
         guard let offlineCheck, !offlineCheck.known else { return nil }
         let candidates = offlineCheck.rankedCandidates + systemCandidates.prefix(8).map { AutocorrectionEngine.Candidate($0) }
         return engine.rankedReplacement(for: word, language: language, candidates: candidates,
-                                        isKnownWord: systemWordIsKnown)
+                                        isKnownWord: systemWordIsKnown, languageModel: languageModel,
+                                        previousContext: previousContext)
     }
 }
 

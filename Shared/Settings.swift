@@ -36,6 +36,10 @@ struct KeyboardSettings {
     var interfaceLanguage: InterfaceLanguage = .russian
     var emojiKeyEnabled = false
     var allowProfanitySuggestions = false
+    var nextWordPrediction = true
+    var personalizationEnabled = true
+    var keyboardHeightScale = 1.0
+    var visualKeyWidthScale = 1.0
 
     static func load(shared: Bool = true) -> KeyboardSettings {
         let defaults = shared ? (UserDefaults(suiteName: group) ?? .standard) : .standard
@@ -59,6 +63,10 @@ struct KeyboardSettings {
         result.interfaceLanguage = InterfaceLanguage(rawValue: defaults.string(forKey: "interfaceLanguage") ?? "") ?? .russian
         result.emojiKeyEnabled = defaults.object(forKey: "emojiKeyEnabled") as? Bool ?? false
         result.allowProfanitySuggestions = defaults.object(forKey: "allowProfanitySuggestions") as? Bool ?? false
+        result.nextWordPrediction = defaults.object(forKey: "nextWordPrediction") as? Bool ?? true
+        result.personalizationEnabled = defaults.object(forKey: "personalizationEnabled") as? Bool ?? true
+        result.keyboardHeightScale = clampedKeyboardHeight(defaults.object(forKey: "keyboardHeightScale") as? Double ?? 1)
+        result.visualKeyWidthScale = clampedVisualKeyWidth(defaults.object(forKey: "visualKeyWidthScale") as? Double ?? 1)
         if let values = defaults.stringArray(forKey: "languages") {
             result.languages = EnabledKeyboardLanguages.normalized(values.compactMap(KeyboardLanguage.init(rawValue:)))
         }
@@ -86,8 +94,12 @@ struct KeyboardSettings {
         defaults.set(interfaceLanguage.rawValue, forKey: "interfaceLanguage")
         defaults.set(emojiKeyEnabled, forKey: "emojiKeyEnabled")
         defaults.set(allowProfanitySuggestions, forKey: "allowProfanitySuggestions")
+        defaults.set(nextWordPrediction, forKey: "nextWordPrediction")
+        defaults.set(personalizationEnabled, forKey: "personalizationEnabled")
+        defaults.set(Self.clampedKeyboardHeight(keyboardHeightScale), forKey: "keyboardHeightScale")
+        defaults.set(Self.clampedVisualKeyWidth(visualKeyWidthScale), forKey: "visualKeyWidthScale")
     }
-    private static let overrideKeys = ["keyboard.haptics", "keyboard.extraSymbols", "keyboard.symbolHints", "keyboard.holdDelay", "keyboard.autoCorrection", "keyboard.compactKeys", "keyboard.showKeyPreview", "keyboard.doubleSpacePeriod", "keyboard.swipeDeleteWord", "keyboard.glideTyping", "keyboard.personalLexicon", "keyboard.autoCapitalization", "keyboard.touchAdaptationEnabled", "keyboard.debugTouchZones", "keyboard.languages", "keyboard.interfaceLanguage", "keyboard.emojiKeyEnabled", "keyboard.allowProfanitySuggestions"]
+    private static let overrideKeys = ["keyboard.haptics", "keyboard.extraSymbols", "keyboard.symbolHints", "keyboard.holdDelay", "keyboard.autoCorrection", "keyboard.compactKeys", "keyboard.showKeyPreview", "keyboard.doubleSpacePeriod", "keyboard.swipeDeleteWord", "keyboard.glideTyping", "keyboard.personalLexicon", "keyboard.autoCapitalization", "keyboard.touchAdaptationEnabled", "keyboard.debugTouchZones", "keyboard.languages", "keyboard.interfaceLanguage", "keyboard.emojiKeyEnabled", "keyboard.allowProfanitySuggestions", "keyboard.nextWordPrediction", "keyboard.personalizationEnabled", "keyboard.keyboardHeightScale", "keyboard.visualKeyWidthScale"]
     /// Extension-local overrides make these controls usable with SideStore even
     /// when the re-signed app cannot share an App Group with its extension.
     static func loadKeyboard(fullAccess: Bool) -> KeyboardSettings {
@@ -113,6 +125,10 @@ struct KeyboardSettings {
         if let raw = defaults.string(forKey: overrideKeys[15]), let value = InterfaceLanguage(rawValue: raw) { result.interfaceLanguage = value }
         if let value = defaults.object(forKey: overrideKeys[16]) as? Bool { result.emojiKeyEnabled = value }
         if let value = defaults.object(forKey: overrideKeys[17]) as? Bool { result.allowProfanitySuggestions = value }
+        if let value = defaults.object(forKey: overrideKeys[18]) as? Bool { result.nextWordPrediction = value }
+        if let value = defaults.object(forKey: overrideKeys[19]) as? Bool { result.personalizationEnabled = value }
+        if let value = defaults.object(forKey: overrideKeys[20]) as? Double { result.keyboardHeightScale = clampedKeyboardHeight(value) }
+        if let value = defaults.object(forKey: overrideKeys[21]) as? Double { result.visualKeyWidthScale = clampedVisualKeyWidth(value) }
         return result
     }
     func saveKeyboardOverrides() {
@@ -135,6 +151,10 @@ struct KeyboardSettings {
         defaults.set(interfaceLanguage.rawValue, forKey: Self.overrideKeys[15])
         defaults.set(emojiKeyEnabled, forKey: Self.overrideKeys[16])
         defaults.set(allowProfanitySuggestions, forKey: Self.overrideKeys[17])
+        defaults.set(nextWordPrediction, forKey: Self.overrideKeys[18])
+        defaults.set(personalizationEnabled, forKey: Self.overrideKeys[19])
+        defaults.set(Self.clampedKeyboardHeight(keyboardHeightScale), forKey: Self.overrideKeys[20])
+        defaults.set(Self.clampedVisualKeyWidth(visualKeyWidthScale), forKey: Self.overrideKeys[21])
     }
     static func clearKeyboardOverrides() {
         for key in overrideKeys where key != "keyboard.personalLexicon" { UserDefaults.standard.removeObject(forKey: key) }
@@ -148,6 +168,12 @@ struct KeyboardSettings {
     }
     private static func clampedDelay(_ value: Double) -> Double {
         value.isFinite ? min(0.8, max(0.25, value)) : 0.4
+    }
+    static func clampedKeyboardHeight(_ value: Double) -> Double {
+        KeyboardSizing.heightScale(value)
+    }
+    static func clampedVisualKeyWidth(_ value: Double) -> Double {
+        KeyboardSizing.visualWidthScale(value)
     }
 }
 
