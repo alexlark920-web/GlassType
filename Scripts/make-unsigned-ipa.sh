@@ -11,6 +11,24 @@ for language in en ru uk; do
   resource="$app/PlugIns/GlassTypeKeyboard.appex/KeyboardCore_KeyboardCore.bundle/lexicon_${language}.txt"
   test -s "$resource" || { echo "Missing keyboard lexicon: $resource" >&2; exit 1; }
 done
+python3 - "$app" <<'PY'
+import json
+from pathlib import Path
+import plistlib
+import subprocess
+import sys
+
+app = Path(sys.argv[1])
+info = plistlib.loads((app / 'Info.plist').read_bytes())
+primary = info.get('CFBundleIcons', {}).get('CFBundlePrimaryIcon', {})
+assert primary.get('CFBundleIconName') == 'AppIcon', 'Compiled primary app icon missing'
+assert primary.get('CFBundleIconFiles'), 'Legacy app icon fallbacks missing'
+catalog = app / 'Assets.car'
+assert catalog.is_file() and catalog.stat().st_size > 0, 'Compiled app icon catalog missing'
+assets = json.loads(subprocess.check_output(['/usr/bin/assetutil', '--info', str(catalog)], text=True))
+assert 'dark' in json.dumps(assets).lower(), 'Compiled dark appearance missing'
+print('Verified primary AppIcon, fallback files and dark appearance in Assets.car')
+PY
 stage="$(mktemp -d "${TMPDIR:-/tmp}/glasstype-ipa.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 mkdir "$stage/Payload"

@@ -54,7 +54,9 @@ def validate_references(value):
 validate_references(objects)
 for value in objects.values():
     if value['isa'] == 'PBXFileReference' and value.get('sourceTree') == '<group>':
-        require((ROOT / value['path']).is_file(), f'Missing file: {value["path"]}')
+        path = ROOT / value['path']
+        exists = path.is_dir() if value.get('lastKnownFileType') == 'folder.assetcatalog' else path.is_file()
+        require(exists, f'Missing project input: {value["path"]}')
 
 targets = {o['name']: o for o in objects.values() if o['isa'] == 'PBXNativeTarget'}
 require(set(targets) == {'GlassType', 'GlassTypeKeyboard'}, 'Expected app and keyboard targets')
@@ -75,6 +77,26 @@ embed = next(objects[ref] for ref in app['buildPhases'] if objects[ref]['isa'] =
 require(embed['dstSubfolderSpec'] == '13', 'Extension must be embedded into PlugIns')
 require(objects[objects[embed['files'][0]]['fileRef']]['path'] == 'GlassTypeKeyboard.appex', 'Wrong embedded product')
 require(bool(app['dependencies']), 'Missing extension build dependency')
+
+# App icons are resources of the containing app, independent of keyboard themes.
+import json
+import struct
+app_resources = next(objects[ref] for ref in app['buildPhases'] if objects[ref]['isa'] == 'PBXResourcesBuildPhase')
+resource_paths = {objects[objects[ref]['fileRef']]['path'] for ref in app_resources['files']}
+require('App/Assets.xcassets' in resource_paths, 'App icon catalog not bundled')
+for ref in objects[app['buildConfigurationList']]['buildConfigurations']:
+    require(objects[ref]['buildSettings'].get('ASSETCATALOG_COMPILER_APPICON_NAME') == 'AppIcon', 'AppIcon name missing')
+icon_set = ROOT / 'App/Assets.xcassets/AppIcon.appiconset'
+icons = json.loads((icon_set / 'Contents.json').read_text())['images']
+require(len(icons) == 2, 'Expected default and dark app icons')
+require(any(not icon.get('appearances') for icon in icons), 'Default app icon missing')
+require(any({'appearance': 'luminosity', 'value': 'dark'} in icon.get('appearances', []) for icon in icons), 'Dark app icon missing')
+for icon in icons:
+    require(icon['idiom'] == 'universal' and icon['platform'] == 'ios' and icon['size'] == '1024x1024', 'Wrong icon slot')
+    data = (icon_set / icon['filename']).read_bytes()
+    require(data[:8] == b'\x89PNG\r\n\x1a\n' and data[12:16] == b'IHDR', 'Invalid icon PNG')
+    width, height, depth, color = struct.unpack('>IIBB', data[16:26])
+    require((width, height, depth, color) == (1024, 1024, 8, 2), 'App icon must be opaque 1024px RGB PNG')
 
 plists = {}
 for path in [*ROOT.glob('*/Info.plist'), *ROOT.glob('*/*.entitlements'), *ROOT.glob('*/PrivacyInfo.xcprivacy')]:
