@@ -46,6 +46,6 @@ python3 Scripts/validate_project.py
 
 ## Текущие результаты
 
-GitHub Actions [#20](https://github.com/alexlark920-web/GlassType/actions/runs/42356253976) для GlassType 1.9 (17) прошёл: XCTest `KeyboardCore`, сборка для generic iOS Simulator и unsigned device archive/IPA завершились успешно. Workflow создал артефакты IPA и `GlassType-source-v1.9-build17`.
+GitHub Actions [#22](https://github.com/alexlark920-web/GlassType/actions/runs/42359475877) для GlassType 1.10 (18) прошёл: структурная проверка, XCTest `KeyboardCore`, сборка generic iOS Simulator, unsigned device archive/IPA и упаковка versioned source archive. Получены артефакты `GlassType-unsigned-IPA` и `GlassType-source-v1.10-build18`.
 
-В текущей Linux-среде `python3 Scripts/validate_project.py` проходит структурную проверку. `bash Scripts/check-macos.sh` сообщает об отсутствии macOS/Xcode/Swift/iOS Simulator SDK; локальные XCTest и Xcode в этой среде не запускались. Установка IPA через SideStore, ручные сценарии на iPhone 15 Pro, подпись и проверка поведения на устройстве остаются невыполненными.
+В текущей Linux-среде `python3 Scripts/validate_project.py` проходит структурную проверку. `bash Scripts/check-macos.sh` сообщает об отсутствии macOS/Xcode/Swift/iOS Simulator SDK; локальные XCTest и Xcode в этой среде не запускались. Установка IPA через SideStore и ручные сценарии на iPhone 15 Pro остаются невыполненными, включая фактическое обнаружение копирования и системный рендеринг новых Emoji 18.0 на установленной версии iOS.
