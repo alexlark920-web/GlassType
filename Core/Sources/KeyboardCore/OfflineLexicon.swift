@@ -16,8 +16,8 @@ public enum OfflineLexicon {
             var index: [String: Int] = [:]
             var groups: [String: [Int32]] = [:]
             list.reserveCapacity(31_000); index.reserveCapacity(31_000); groups.reserveCapacity(1000)
-            for line in content.split(whereSeparator: { $0.isNewline }).prefix(31_000) {
-                let word = String(line)
+            let bundled = content.split(whereSeparator: { $0.isNewline }).prefix(31_000).map { String($0) }
+            for word in (bundled + SupplementalVocabulary.words(for: language)) {
                 guard (2...24).contains(word.count), index[word] == nil else { continue }
                 let position = Int32(list.count)
                 groups[String(word.prefix(1)), default: []].append(position)
@@ -55,15 +55,21 @@ public enum OfflineLexicon {
     }
     public static func isPrepared(language: KeyboardLanguage) -> Bool { preparedData(for: language) != nil }
     public static func words(language: KeyboardLanguage) -> [String] { data(for: language).words }
-    public static func completions(prefix: String, language: KeyboardLanguage, limit: Int = 3, cachedOnly: Bool = false) -> [String] {
+    public static func completions(prefix: String, language: KeyboardLanguage, limit: Int = 3, cachedOnly: Bool = false, includeProfanity: Bool = false) -> [String] {
         let key = normalized(prefix)
         guard (1...24).contains(key.count), limit > 0 else { return [] }
         guard let dictionary = cachedOnly ? preparedData(for: language) : data(for: language) else { return [] }
-        guard let positions = dictionary.prefixes[String(key.prefix(2))] else { return [] }
+        let positions = dictionary.prefixes[String(key.prefix(2))] ?? []
         var result: [String] = []; result.reserveCapacity(min(8, limit))
+        if key.count >= 3 {
+            for word in SupplementalVocabulary.words(for: language) where word.hasPrefix(key) && word != key && (includeProfanity || !SupplementalVocabulary.isProfanity(word, language: language)) {
+                result.append(word)
+                if result.count == min(8, limit) { return result }
+            }
+        }
         for position in positions {
             let word = dictionary.words[Int(position)]
-            if word != key && word.hasPrefix(key) {
+            if word != key && word.hasPrefix(key) && !result.contains(word) && (includeProfanity || !SupplementalVocabulary.isProfanity(word, language: language)) {
                 result.append(word)
                 if result.count == min(8, limit) { break }
             }
@@ -76,10 +82,11 @@ public enum OfflineLexicon {
         public let rankedCandidates: [AutocorrectionEngine.Candidate]
     }
     /// One immutable snapshot; never waits for corpus construction on a UI call.
-    public static func preparedCheck(_ word: String, language: KeyboardLanguage) -> SpellingCheck? {
+    public static func preparedCheck(_ word: String, language: KeyboardLanguage, includeProfanity: Bool = false) -> SpellingCheck? {
         guard let dictionary = preparedData(for: language) else { return nil }
         let known = dictionary.ranks[normalized(word)] != nil
         let words = known ? [] : candidates(for: word, language: language, dictionary: dictionary, limit: 16)
+            .filter { includeProfanity || !SupplementalVocabulary.isProfanity($0, language: language) }
         return SpellingCheck(known: known, candidates: words,
                              rankedCandidates: words.map { .init($0, frequencyRank: dictionary.ranks[$0]) })
     }
@@ -89,13 +96,14 @@ public enum OfflineLexicon {
     public static func frequencyIndex(word: String, language: KeyboardLanguage) -> Int? {
         data(for: language).ranks[normalized(word)]
     }
-    public static func correctionCandidates(_ word: String, language: KeyboardLanguage, limit: Int = 8) -> [String] {
-        correctionCandidates(for: word, language: language, limit: limit)
+    public static func correctionCandidates(_ word: String, language: KeyboardLanguage, limit: Int = 8, includeProfanity: Bool = false) -> [String] {
+        correctionCandidates(for: word, language: language, limit: limit, includeProfanity: includeProfanity)
     }
     /// Generate edit-distance-one words and use O(1) dictionary membership.
     /// This avoids scanning every word or retaining a large deletion index.
-    public static func correctionCandidates(for word: String, language: KeyboardLanguage, limit: Int = 8) -> [String] {
+    public static func correctionCandidates(for word: String, language: KeyboardLanguage, limit: Int = 8, includeProfanity: Bool = false) -> [String] {
         candidates(for: word, language: language, dictionary: data(for: language), limit: limit)
+            .filter { includeProfanity || !SupplementalVocabulary.isProfanity($0, language: language) }
     }
     private static func candidates(for word: String, language: KeyboardLanguage, dictionary: DataSet, limit: Int) -> [String] {
         let key = normalized(word)

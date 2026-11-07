@@ -92,6 +92,11 @@ final class KeyboardCoreTests: XCTestCase {
         XCTAssertEqual(provider.suggestions(context: "HE", language: .english), ["here", "her", "hey"])
         XCTAssertTrue(provider.suggestions(context: String(repeating: "a", count: 100_000), language: .english).isEmpty)
     }
+    func testSupplementalSlangParticipatesInSuggestions() {
+        let provider = LocalSuggestionProvider()
+        XCTAssertTrue(provider.suggestions(context: "try rizz", language: .english).contains("rizzler"))
+        XCTAssertTrue(provider.suggestions(context: "вайб", language: .russian).contains("вайбовый"))
+    }
     func testReplacementCountsCharactersNotUTF16Units() {
         XCTAssertEqual(LocalSuggestionProvider.trailingWord(in: "👨‍👩‍👧‍👦 привіт"), "привіт")
         XCTAssertEqual(LocalSuggestionProvider.trailingWord(in: "cafe\u{301}"), "cafe\u{301}")

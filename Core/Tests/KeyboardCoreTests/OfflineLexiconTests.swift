@@ -42,6 +42,17 @@ final class OfflineLexiconTests: XCTestCase {
         XCTAssertTrue(OfflineLexicon.completions(prefix: "hello ", language: .english).isEmpty)
         XCTAssertTrue(OfflineLexicon.completions(prefix: "h", language: .english, limit: 0).isEmpty)
     }
+    func testSupplementalSlangExistsAndProfanityCanBeFilteredFromSuggestionsAndCorrection() {
+        for (word, language) in [("rizz", KeyboardLanguage.english), ("вайб", .russian), ("крінж", .ukrainian)] {
+            XCTAssertTrue(OfflineLexicon.contains(word, language: language), word)
+        }
+        XCTAssertFalse(OfflineLexicon.completions(prefix: "fuc", language: .english).contains("fuck"))
+        XCTAssertTrue(OfflineLexicon.completions(prefix: "fuc", language: .english, includeProfanity: true).contains("fuck"))
+        XCTAssertTrue(SupplementalVocabulary.isProfanity("FUCK", language: .english))
+        XCTAssertFalse(SupplementalVocabulary.isProfanity("rizz", language: .english))
+        XCTAssertFalse(OfflineLexicon.preparedCheck("fukc", language: .english)?.candidates.contains(where: { SupplementalVocabulary.isProfanity($0, language: .english) }) ?? false)
+        XCTAssertFalse(OfflineLexicon.correctionCandidates("fukc", language: .english).contains(where: { SupplementalVocabulary.isProfanity($0, language: .english) }))
+    }
     func testUIQueriesNeverConstructAnEvictedLanguage() {
         // Drive the bounded two-language cache through two complete rotations.
         for _ in 0..<2 { for language in KeyboardLanguage.allCases { _ = OfflineLexicon.words(language: language) } }

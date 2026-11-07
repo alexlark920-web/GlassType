@@ -306,6 +306,7 @@ private final class SpacebarButton: KeyButton {
     var onCursorEnd: (() -> Void)?
     private var interaction = SpacebarInteraction()
     private var holdTimer: Timer?
+    private var cursorRepeatTimer: Timer?
     override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         cancelInteraction()
         _ = super.beginTracking(touch, with: event)
@@ -314,7 +315,7 @@ private final class SpacebarButton: KeyButton {
         isHighlighted = true
         let timer = Timer(timeInterval: SpacebarInteraction.holdDuration, repeats: false) { [weak self] _ in
             guard let self else { return }
-            self.onAction?(self.interaction.hold(at: ProcessInfo.processInfo.systemUptime))
+            self.send(self.interaction.hold(at: ProcessInfo.processInfo.systemUptime))
             self.holdTimer = nil
         }
         holdTimer = timer; RunLoop.main.add(timer, forMode: .common)
@@ -322,11 +323,12 @@ private final class SpacebarButton: KeyButton {
     }
     override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         let point = touch.location(in: self)
-        onAction?(interaction.update(x: Double(point.x), y: Double(point.y), at: ProcessInfo.processInfo.systemUptime))
+        send(interaction.update(x: Double(point.x), y: Double(point.y), at: ProcessInfo.processInfo.systemUptime))
         return true
     }
     override func endTracking(_ touch: UITouch?, with event: UIEvent?) {
         holdTimer?.invalidate(); holdTimer = nil
+        cursorRepeatTimer?.invalidate(); cursorRepeatTimer = nil
         let action: SpacebarInteraction.Action
         if let touch {
             let point = touch.location(in: self)
@@ -334,7 +336,7 @@ private final class SpacebarButton: KeyButton {
         } else { interaction.cancel(); action = .none }
         super.endTracking(touch, with: event)
         isHighlighted = false
-        onAction?(action)
+        send(action)
         onCursorEnd?()
     }
     override func cancelTracking(with event: UIEvent?) {
@@ -347,11 +349,22 @@ private final class SpacebarButton: KeyButton {
     }
     func cancelInteraction() {
         let wasCursor = interaction.phase == .cursor
-        holdTimer?.invalidate(); holdTimer = nil; interaction.cancel(); isHighlighted = false
+        holdTimer?.invalidate(); holdTimer = nil; cursorRepeatTimer?.invalidate(); cursorRepeatTimer = nil
+        interaction.cancel(); isHighlighted = false
         if wasCursor { onCursorEnd?() }
     }
+    private func send(_ action: SpacebarInteraction.Action) {
+        if case .cursorBegan = action, cursorRepeatTimer == nil {
+            let timer = Timer(timeInterval: 0.075, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.send(self.interaction.repeatCursorAtEdge(buttonWidth: Double(self.bounds.width)))
+            }
+            cursorRepeatTimer = timer; RunLoop.main.add(timer, forMode: .common)
+        }
+        onAction?(action)
+    }
     override func accessibilityActivate() -> Bool { onAction?(.insertSpace); return true }
-    deinit { holdTimer?.invalidate() }
+    deinit { holdTimer?.invalidate(); cursorRepeatTimer?.invalidate() }
 }
 
 private final class DeleteKeyButton: KeyButton {
@@ -1180,6 +1193,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         toggle("Автозамена", value: settings.autoCorrection, group: typing) { [weak self] value in
             self?.settings.autoCorrection = value; self?.settings.saveKeyboardOverrides()
         }
+        toggle("Разрешить нецензурные слова в подсказках и автозамене", value: settings.allowProfanitySuggestions, group: typing) { [weak self] value in
+            self?.settings.allowProfanitySuggestions = value; self?.settings.saveKeyboardOverrides(); self?.refreshSuggestions()
+        }
         toggle("Заглавные в начале предложений", value: settings.autoCapitalization, group: typing) { [weak self] value in
             self?.settings.autoCapitalization = value; self?.settings.saveKeyboardOverrides()
         }
@@ -1808,7 +1824,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
               let word = personalWord(in: context) else { return false }
         guard suppressedCorrection != word,
               let replacement = textService.replacement(for: word, language: state.language,
-                                                        personalLexicon: settings.personalLexicon),
+                                                        personalLexicon: settings.personalLexicon,
+                                                        includeProfanity: settings.allowProfanitySuggestions),
               replacement != word else { return false }
         guard textDocumentProxy.documentContextBeforeInput == context, (textDocumentProxy.selectedText ?? "").isEmpty else { return false }
         correctionUndo = nil
@@ -1987,8 +2004,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         let context = textDocumentProxy.documentContextBeforeInput
         let prefix = context.map { LocalSuggestionProvider.trailingWord(in: String($0.suffix(64))) } ?? ""
-        let personalCandidates = settings.suggestions ? settings.personalLexicon.completions(for: prefix, limit: 3) : []
-        let corpusCandidates = settings.suggestions && !prefix.isEmpty && prefix.count < 64 ? provider.suggestions(context: context ?? "", language: state.language) : []
+        let personalCandidates = settings.suggestions ? settings.personalLexicon.completions(for: prefix, limit: 3).filter { settings.allowProfanitySuggestions || !SupplementalVocabulary.isProfanity($0, language: state.language) } : []
+        let corpusCandidates = settings.suggestions && !prefix.isEmpty && prefix.count < 64 ? provider.suggestions(context: context ?? "", language: state.language, includeProfanity: settings.allowProfanitySuggestions) : []
         var seenCandidates = Set<String>()
         let candidates = (personalCandidates + corpusCandidates).filter { seenCandidates.insert($0.lowercased()).inserted }
         let words = candidates.map { candidate in
@@ -1997,7 +2014,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         pendingPrefix = words.isEmpty ? nil : prefix
         suggestionWords = words
         let canOfferSave = words.isEmpty && settings.suggestions && (3...64).contains(prefix.count) &&
-            prefix.allSatisfy(\.isLetter) && !settings.personalLexicon.containsKnownWord(prefix) &&
+            prefix.allSatisfy(\.isLetter) && !SupplementalVocabulary.isProfanity(prefix, language: state.language) && !settings.personalLexicon.containsKnownWord(prefix) &&
             textDocumentProxy.isSecureTextEntry != true && OfflineLexicon.preparedCheck(prefix, language: state.language)?.known == false
         let signature = state.language.rawValue + "|" + prefix + "|" + words.joined(separator: "|") + (canOfferSave ? "|save" : "")
         guard suggestionSignature != signature else { return }

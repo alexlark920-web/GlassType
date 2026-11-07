@@ -56,8 +56,30 @@ final class SpacebarInteractionTests: XCTestCase {
     func testTrackpadMotionNeverTurnsIntoLanguageSwipe() {
         var gesture = started()
         _ = gesture.hold(at: 0.43)
-        XCTAssertEqual(gesture.update(x: 20, y: 20, at: 0.5), .moveCursor(-10))
+        XCTAssertEqual(gesture.update(x: 20, y: 20, at: 0.5), .moveCursor(-24))
         XCTAssertEqual(gesture.end(x: 20, y: 20, at: 0.6), .none)
+    }
+    func testCursorAcceleratesWithGreaterDistanceFromSpacebar() {
+        var near = started(); _ = near.hold(at: 0.43)
+        var far = started(); _ = far.hold(at: 0.43)
+        let nearSteps = near.update(x: 124, y: 20, at: 0.5)
+        let farSteps = far.update(x: 180, y: 20, at: 0.5)
+        guard case .moveCursor(let nearCount) = nearSteps, case .moveCursor(let farCount) = farSteps else {
+            return XCTFail("Expected both gestures to move the cursor")
+        }
+        XCTAssertGreaterThan(farCount, nearCount)
+    }
+    func testCursorRepeatsOnlyWhenTouchMovesOutsideSpacebarBounds() {
+        var gesture = started(); _ = gesture.hold(at: 0.43)
+        _ = gesture.update(x: 140, y: 20, at: 0.5)
+        XCTAssertEqual(gesture.repeatCursorAtEdge(buttonWidth: 200), .none)
+        _ = gesture.update(x: 240, y: 20, at: 0.6)
+        XCTAssertEqual(gesture.repeatCursorAtEdge(buttonWidth: 200), .moveCursor(1))
+        _ = gesture.update(x: 720, y: 20, at: 0.7)
+        XCTAssertEqual(gesture.repeatCursorAtEdge(buttonWidth: 200), .moveCursor(8))
+        XCTAssertEqual(gesture.update(x: 720, y: 20, at: 0.72), .none)
+        gesture.cancel()
+        XCTAssertEqual(gesture.repeatCursorAtEdge(buttonWidth: 200), .none)
     }
     func testCursorHasDeadbandAndRetainsSubcharacterMotion() {
         var gesture = started()

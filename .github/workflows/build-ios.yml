@@ -1,77 +1,209 @@
-name: Build iOS keyboard
+name: Build and distribute iOS keyboard
 
 on:
-  workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
-    branches:
-      - main
-    paths:
-      - App/**
-      - Keyboard/**
-      - Shared/**
-      - Core/**
-      - GlassType.xcodeproj/**
-      - Docs/**
-      - Scripts/**
-      - README.md
-      - LICENSE
-      - .github/workflows/build-ios.yml
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Publication channel
+        type: choice
+        options: [beta, stable]
+        default: beta
+        required: true
 
 permissions:
   contents: read
 
+concurrency:
+  group: glasstype-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    outputs:
+      channel: ${{ steps.meta.outputs.channel }}
+      version: ${{ steps.meta.outputs.version }}
+      build: ${{ steps.meta.outputs.build }}
+      tag: ${{ steps.meta.outputs.tag }}
+      ipa_name: ${{ steps.meta.outputs.ipa_name }}
+      publish: ${{ steps.meta.outputs.publish }}
 
     steps:
-      - name: Download project
+      - name: Checkout private source
         uses: actions/checkout@v4
 
       - name: Show Xcode version
         run: |
-          ls -d /Applications/Xcode*.app
           xcodebuild -version
           xcodebuild -showsdks
 
       - name: Validate project structure
         run: python3 Scripts/validate_project.py
 
-      - name: Run tests and simulator build
+      - name: Run XCTest and simulator build
         run: bash Scripts/check-macos.sh
 
-      - name: Build unsigned IPA
+      - name: Choose channel and prepare CI-only bundle version
+        if: github.event_name != 'pull_request'
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          if [[ "$EVENT_NAME" == "push" && "$EVENT_REF" == refs/tags/* ]]; then
+            channel=stable
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            channel=beta
+          else
+            channel="$INPUT_CHANNEL"
+          fi
+          python3 Scripts/set_build_version.py --channel "$channel" --run-number "$RUN_NUMBER" --ref "$EVENT_REF"
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' App/Info.plist)
+          build=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' App/Info.plist)
+          if [[ "$channel" == stable ]]; then tag="v$version"; else tag="beta-v${version}-b${build}"; fi
+          ipa_name="GlassType-${channel}-v${version}-b${build}.ipa"
+          {
+            echo "channel=$channel"
+            echo "version=$version"
+            echo "build=$build"
+            echo "tag=$tag"
+            echo "ipa_name=$ipa_name"
+            echo "publish=true"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build unsigned IPA with embedded Keyboard Extension
+        if: github.event_name != 'pull_request'
         run: bash Scripts/make-unsigned-ipa.sh
 
-      - name: Read product version
-        id: release
+      - name: Verify IPA contents and identifiers
+        if: github.event_name != 'pull_request'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          BUILD_NUMBER: ${{ steps.meta.outputs.build }}
+          IPA_NAME: ${{ steps.meta.outputs.ipa_name }}
         run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import plistlib
-          with open("App/Info.plist", "rb") as source:
-              info = plistlib.load(source)
-          print(f"version={info['CFBundleShortVersionString']}")
-          print(f"build={info['CFBundleVersion']}")
-          PY
+          python3 Scripts/validate_ipa.py build/GlassType-unsigned.ipa \
+            --app-bundle-id org.opentype.GlassType \
+            --extension-bundle-id org.opentype.GlassType.Keyboard \
+            --version "$VERSION" --build "$BUILD_NUMBER"
+          mv build/GlassType-unsigned.ipa "build/$IPA_NAME"
 
-      - name: Package versioned sources
-        run: python3 Scripts/package_source.py
-
-      - name: Save IPA for download
+      - name: Upload unsigned IPA artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: GlassType-unsigned-IPA
-          path: build/GlassType-unsigned.ipa
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Save versioned sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: GlassType-source-v${{ steps.release.outputs.version }}-build${{ steps.release.outputs.build }}
-          path: build/GlassType-source-v${{ steps.release.outputs.version }}-build${{ steps.release.outputs.build }}.zip
+          name: GlassType-${{ steps.meta.outputs.channel }}-v${{ steps.meta.outputs.version }}-build${{ steps.meta.outputs.build }}
+          path: build/${{ steps.meta.outputs.ipa_name }}
           if-no-files-found: error
           retention-days: 30
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true' && vars.DISTRIBUTION_REPOSITORY != ''
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      DISTRIBUTION_REPOSITORY: ${{ vars.DISTRIBUTION_REPOSITORY }}
+      CHANNEL: ${{ needs.build.outputs.channel }}
+      VERSION: ${{ needs.build.outputs.version }}
+      BUILD_NUMBER: ${{ needs.build.outputs.build }}
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+      IPA_NAME: ${{ needs.build.outputs.ipa_name }}
+
+    steps:
+      - name: Checkout private source for icon and release notes
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download tested IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: GlassType-${{ needs.build.outputs.channel }}-v${{ needs.build.outputs.version }}-build${{ needs.build.outputs.build }}
+          path: build
+
+      - name: Require publication credentials
+        env:
+          DISTRIBUTION_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
+        run: |
+          test -n "$DISTRIBUTION_TOKEN" || { echo 'Set DISTRIBUTION_TOKEN secret before publication.' >&2; exit 1; }
+          [[ "$DISTRIBUTION_REPOSITORY" =~ ^[^/]+/[^/]+$ ]] || { echo 'Set DISTRIBUTION_REPOSITORY variable to owner/repository.' >&2; exit 1; }
+
+      - name: Checkout public distribution repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.DISTRIBUTION_REPOSITORY }}
+          ref: main
+          path: distribution
+          token: ${{ secrets.DISTRIBUTION_TOKEN }}
+          persist-credentials: false
+
+      - name: Generate release notes from private commit history
+        run: |
+          previous=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+          if [[ -n "$previous" ]]; then
+            notes=$(git log "$previous..HEAD" --pretty=format:'- %s' --no-merges)
+          else
+            notes=$(git log -5 --pretty=format:'- %s' --no-merges)
+          fi
+          [[ -n "$notes" ]] || notes="GlassType $CHANNEL build $BUILD_NUMBER"
+          printf '%s\n' "$notes" > build/release-notes.md
+
+      - name: Prepare official SideStore schema validator
+        run: |
+          python3 -m venv build/schema-venv
+          build/schema-venv/bin/python -m pip install --disable-pip-version-check 'jsonschema==4.25.1'
+
+      - name: Prepare release metadata and validate AltSource
+        run: |
+          mkdir -p distribution/assets
+          cp App/Assets.xcassets/AppIcon.appiconset/AppIcon-Light.png distribution/assets/icon.png
+          python3 Scripts/update_alt_source.py \
+            --distribution distribution --repository "$DISTRIBUTION_REPOSITORY" \
+            --channel "$CHANNEL" --tag "$RELEASE_TAG" --ipa "build/$IPA_NAME" \
+            --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --description "$(cat build/release-notes.md)"
+          build/schema-venv/bin/python Scripts/validate_alt_source.py "distribution/sources/$CHANNEL.json" Scripts/sidestore-source-schema.json
+
+      - name: Publish IPA release to public distribution repository
+        env:
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
+        run: |
+          gh release create "$RELEASE_TAG" "build/$IPA_NAME" \
+            --repo "$DISTRIBUTION_REPOSITORY" \
+            --title "GlassType $CHANNEL $VERSION (build $BUILD_NUMBER)" \
+            --notes-file build/release-notes.md
+          url="https://github.com/$DISTRIBUTION_REPOSITORY/releases/download/$RELEASE_TAG/$IPA_NAME"
+          curl --fail --silent --show-error --location --head "$url" >/dev/null
+
+      - name: Commit AltSource metadata and public icon
+        working-directory: distribution
+        env:
+          DISTRIBUTION_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "sources/$CHANNEL.json" assets/icon.png README.md
+          git commit -m "Publish GlassType $CHANNEL $VERSION"
+          auth=$(printf 'x-access-token:%s' "$DISTRIBUTION_TOKEN" | base64 | tr -d '\n')
+          git -c http.extraheader="AUTHORIZATION: basic $auth" push origin HEAD:main
+          unset auth
+
+      - name: Verify public source JSON and icon URLs
+        run: |
+          source_url="https://raw.githubusercontent.com/$DISTRIBUTION_REPOSITORY/main/sources/$CHANNEL.json"
+          icon_url="https://raw.githubusercontent.com/$DISTRIBUTION_REPOSITORY/main/assets/icon.png"
+          curl --fail --silent --show-error --location "$source_url" --output build/published-source.json
+          cmp "distribution/sources/$CHANNEL.json" build/published-source.json
+          curl --fail --silent --show-error --location --head "$icon_url" >/dev/null

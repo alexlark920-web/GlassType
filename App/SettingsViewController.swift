@@ -18,7 +18,7 @@ final class SettingsViewController: UITableViewController {
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int { 4 }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { [1, 18, 3, 1][section] }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { [1, 19, 3, 1][section] }
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         ["Подключение", "Настройки", "Языки — минимум один", "Проверка ввода"].indices.contains(section)
             ? t(["Подключение", "Настройки", "Языки — минимум один", "Проверка ввода"][section]) : nil
@@ -36,10 +36,10 @@ final class SettingsViewController: UITableViewController {
             cell.accessoryType = .disclosureIndicator
         }
         if indexPath.section == 1 {
-            let labels = ["Тема", "Подсказки", "Заглавная в начале предложения", "Виброотклик", "Символы удержанием", "Метки на клавишах", "Задержка удержания", "Автозамена", "Компактные клавиши", "Отображение символа при нажатии", "Двойной пробел → точка", "Свайп удаления слова", "Свайп-ввод слов", "Адаптация касаний", "Показать зоны касаний", "Лицензии словарей", "Заменить глобус на эмодзи", "Язык интерфейса"]
+            let labels = ["Тема", "Подсказки", "Заглавная в начале предложения", "Виброотклик", "Символы удержанием", "Метки на клавишах", "Задержка удержания", "Автозамена", "Компактные клавиши", "Отображение символа при нажатии", "Двойной пробел → точка", "Свайп удаления слова", "Свайп-ввод слов", "Адаптация касаний", "Показать зоны касаний", "Лицензии словарей", "Заменить глобус на эмодзи", "Разрешить нецензурные слова в подсказках и автозамене", "Язык интерфейса"]
             guard labels.indices.contains(indexPath.row) else { return cell }
             cell.textLabel?.text = t(labels[indexPath.row])
-            cell.textLabel?.numberOfLines = (indexPath.row == 2 || indexPath.row >= 9) ? 2 : 1
+            cell.textLabel?.numberOfLines = indexPath.row == 17 ? 3 : ((indexPath.row == 2 || indexPath.row >= 9) ? 2 : 1)
             switch indexPath.row {
             case 15:
                 cell.accessoryType = .disclosureIndicator
@@ -58,7 +58,7 @@ final class SettingsViewController: UITableViewController {
                 control.selectedSegmentIndex = settings.holdDelay < 0.325 ? 0 : (settings.holdDelay < 0.5 ? 1 : 2)
                 control.addTarget(self, action: #selector(delayChanged(_:)), for: .valueChanged)
                 cell.accessoryView = control
-            case 17:
+            case 18:
                 let control = UISegmentedControl(items: InterfaceLanguage.allCases.map(\.shortTitle))
                 control.selectedSegmentIndex = InterfaceLanguage.allCases.firstIndex(of: settings.interfaceLanguage) ?? 0
                 control.accessibilityLabel = t("Язык интерфейса")
@@ -79,6 +79,7 @@ final class SettingsViewController: UITableViewController {
                 case 13: control.isOn = settings.touchAdaptationEnabled
                 case 14: control.isOn = settings.debugTouchZones
                 case 16: control.isOn = settings.emojiKeyEnabled
+                case 17: control.isOn = settings.allowProfanitySuggestions
                 default: control.isOn = settings.symbolHints
                 }
                 control.addTarget(self, action: #selector(toggle(_:)), for: .valueChanged)
@@ -142,6 +143,7 @@ final class SettingsViewController: UITableViewController {
         case 13: settings.touchAdaptationEnabled = control.isOn
         case 14: settings.debugTouchZones = control.isOn
         case 16: settings.emojiKeyEnabled = control.isOn
+        case 17: settings.allowProfanitySuggestions = control.isOn
         default: settings.symbolHints = control.isOn
         }
         settings.save()

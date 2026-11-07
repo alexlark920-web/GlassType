@@ -18,23 +18,27 @@ final class KeyboardTextService {
     }
 
     func replacement(for word: String, language: KeyboardLanguage,
-                     personalLexicon: PersonalLexicon) -> String? {
+                     personalLexicon: PersonalLexicon,
+                     includeProfanity: Bool = false) -> String? {
         let needsDictionary = correctionPipeline.needsDictionaryChecks(for: word, language: language,
                                                                        personalLexicon: personalLexicon)
-        let local = needsDictionary ? OfflineLexicon.preparedCheck(word, language: language) : nil
+        let local = needsDictionary ? OfflineLexicon.preparedCheck(word, language: language, includeProfanity: includeProfanity) : nil
         let system: (known: Bool, candidates: [String])
         if let local, local.known {
             system = (known: true, candidates: [])
         } else if needsDictionary {
-            system = spelling.check(word, language: language)
+            let check = spelling.check(word, language: language)
+            system = (known: check.known, candidates: includeProfanity ? check.candidates : check.candidates.filter { !SupplementalVocabulary.isProfanity($0, language: language) })
         } else {
             system = (known: false, candidates: [])
         }
-        return correctionPipeline.replacement(for: word, language: language,
+        let replacement = correctionPipeline.replacement(for: word, language: language,
                                               personalLexicon: personalLexicon,
                                               offlineCheck: local,
                                               systemWordIsKnown: system.known,
                                               systemCandidates: system.candidates)
+        guard includeProfanity || replacement.map({ !SupplementalVocabulary.isProfanity($0, language: language) }) == true else { return nil }
+        return replacement
     }
 }
 

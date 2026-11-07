@@ -32,8 +32,11 @@ public struct SpacebarInteraction {
         guard x.isFinite, y.isFinite, time.isFinite else { cancel(); return .none }
         lastX = x; lastY = y
         if phase == .cursor {
-            let offset = (x - cursorAnchor) / Self.cursorStep
-            let steps = Int(min(32, max(-32, offset)))
+            let distance = x - cursorAnchor
+            let magnitude = abs(distance)
+            let acceleration = min(5.0, 1.0 + max(0, magnitude - 24.0) / 40.0)
+            let offset = distance / Self.cursorStep * acceleration
+            let steps = Int(min(48, max(-48, offset)))
             guard steps != 0 else { return .none }
             cursorAnchor += Double(steps) * Self.cursorStep
             return .moveCursor(steps)
@@ -50,6 +53,19 @@ public struct SpacebarInteraction {
             phase = .cancelled; return .none
         }
         return hold(at: time)
+    }
+    /// Repeats cursor motion when the held finger reaches the keyboard's
+    /// physical edge. The UI calls this on a short timer while the touch stays down.
+    public mutating func repeatCursorAtEdge(buttonWidth: Double) -> Action {
+        guard phase == .cursor, buttonWidth.isFinite, buttonWidth > 0 else { return .none }
+        let direction: Double
+        let distance: Double
+        if lastX < 0 { direction = -1; distance = -lastX }
+        else if lastX > buttonWidth { direction = 1; distance = lastX - buttonWidth }
+        else { return .none }
+        let steps = min(8, max(1, 1 + Int(distance / 48)))
+        cursorAnchor = lastX
+        return .moveCursor(Int(direction) * steps)
     }
     /// Called by the UI's hold timer as well as touch updates.
     public mutating func hold(at time: Double) -> Action {

@@ -76,16 +76,21 @@ public struct InputState {
 
 }
 public protocol SuggestionProvider {
-    func suggestions(context: String, language: KeyboardLanguage) -> [String]
+    func suggestions(context: String, language: KeyboardLanguage, includeProfanity: Bool) -> [String]
+}
+public extension SuggestionProvider {
+    func suggestions(context: String, language: KeyboardLanguage) -> [String] {
+        suggestions(context: context, language: language, includeProfanity: false)
+    }
 }
 /// Frequency-ranked offline prefix lookup. No learning, persistence or replacement.
 public struct LocalSuggestionProvider: SuggestionProvider {
     private let cachedOnly: Bool
     public init(cachedOnly: Bool = false) { self.cachedOnly = cachedOnly }
-    public func suggestions(context: String, language: KeyboardLanguage) -> [String] {
+    public func suggestions(context: String, language: KeyboardLanguage, includeProfanity: Bool = false) -> [String] {
         guard let last = context.last, last.isLetter else { return [] }
         let prefix = String(context.suffix(64).reversed().prefix(while: { $0.isLetter }).reversed()).lowercased()
-        return OfflineLexicon.completions(prefix: prefix, language: language, cachedOnly: cachedOnly)
+        return OfflineLexicon.completions(prefix: prefix, language: language, cachedOnly: cachedOnly, includeProfanity: includeProfanity)
     }
 
     public static func trailingWord(in context: String) -> String {
