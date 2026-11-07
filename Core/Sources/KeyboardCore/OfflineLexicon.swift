@@ -73,12 +73,15 @@ public enum OfflineLexicon {
     public struct SpellingCheck {
         public let known: Bool
         public let candidates: [String]
+        public let rankedCandidates: [AutocorrectionEngine.Candidate]
     }
     /// One immutable snapshot; never waits for corpus construction on a UI call.
     public static func preparedCheck(_ word: String, language: KeyboardLanguage) -> SpellingCheck? {
         guard let dictionary = preparedData(for: language) else { return nil }
         let known = dictionary.ranks[normalized(word)] != nil
-        return SpellingCheck(known: known, candidates: known ? [] : candidates(for: word, language: language, dictionary: dictionary, limit: 8))
+        let words = known ? [] : candidates(for: word, language: language, dictionary: dictionary, limit: 16)
+        return SpellingCheck(known: known, candidates: words,
+                             rankedCandidates: words.map { .init($0, frequencyRank: dictionary.ranks[$0]) })
     }
     public static func contains(_ word: String, language: KeyboardLanguage) -> Bool {
         data(for: language).ranks[normalized(word)] != nil

@@ -86,8 +86,7 @@ final class SettingsViewController: UITableViewController {
         }
         if indexPath.section == 2 {
             let language = KeyboardLanguage.allCases[indexPath.row]
-            if settings.languages.contains(language) { if settings.languages.count > 1 { settings.languages.removeAll { $0 == language } } }
-            else { settings.languages.append(language) }
+            settings.languages = EnabledKeyboardLanguages.setting(language, enabled: !settings.languages.contains(language), in: settings.languages)
             settings.save(); tableView.reloadSections(IndexSet(integer: 2), with: .none)
         }
     }

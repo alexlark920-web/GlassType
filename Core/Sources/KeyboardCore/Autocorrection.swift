@@ -3,7 +3,61 @@ import Foundation
 /// Conservative on-device correction policy. System dictionary candidates are
 /// supplied by the UIKit adapter; common typos remain available without it.
 public struct AutocorrectionEngine {
+    public struct Candidate {
+        public let word: String
+        public let frequencyRank: Int?
+        public init(_ word: String, frequencyRank: Int? = nil) {
+            self.word = word; self.frequencyRank = frequencyRank
+        }
+    }
     public init() {}
+    /// Frequency and keyboard-neighbour costs are separate, explicit heuristics.
+    /// Unlike the unique-candidate API below, this can choose a dominant local
+    /// word from several dictionary guesses. Near ties deliberately stay intact.
+    public func rankedReplacement(for word: String, language: KeyboardLanguage,
+                                  candidates: [Candidate], isKnownWord: Bool = false) -> String? {
+        guard !isKnownWord else { return nil }
+        if let explicit = replacement(for: word, language: language) { return explicit }
+        let lower = word.lowercased()
+        guard (4...24).contains(lower.count), word == lower || word == lower.capitalized,
+              !word.allSatisfy(\.isUppercase), lower.allSatisfy(\.isLetter), isNative(lower, language: language) else { return nil }
+        var matches: [String: Candidate] = [:]
+        for candidate in candidates.prefix(32) {
+            let text = candidate.word.lowercased()
+            guard text != lower, text.allSatisfy(\.isLetter), isNative(text, language: language), Self.isSingleEdit(lower, text) else { continue }
+            let rank = candidate.frequencyRank.flatMap { $0 >= 0 ? $0 : nil }
+            if let existing = matches[text] {
+                if let rank, rank < (existing.frequencyRank ?? Int.max) { matches[text] = Candidate(text, frequencyRank: rank) }
+            } else { matches[text] = Candidate(text, frequencyRank: rank) }
+        }
+        let ranked = matches.map { text, candidate -> (word: String, score: Double) in
+            let prior = candidate.frequencyRank.map { 0.15 * log(Double($0) + 16) } ?? 1.35
+            return (text, editCost(lower, text, language: language) + prior)
+        }.sorted { $0.score == $1.score ? $0.word < $1.word : $0.score < $1.score }
+        guard let best = ranked.first, best.score <= 2.65 else { return nil }
+        if ranked.count > 1, ranked[1].score - best.score < 0.18 { return nil }
+        return word == lower.capitalized ? best.word.capitalized : best.word
+    }
+
+    private func editCost(_ a: String, _ b: String, language: KeyboardLanguage) -> Double {
+        let source = Array(a), target = Array(b)
+        guard source.count == target.count else { return 0.80 }
+        let differences = source.indices.filter { source[$0] != target[$0] }
+        if differences.count == 2 { return 0.55 } // adjacent transposition
+        guard let i = differences.first else { return 0 }
+        func position(_ character: Character) -> (Double, Double)? {
+            let rows = language.rows
+            let width = rows.map(\.count).max() ?? 1
+            for (row, keys) in rows.enumerated() {
+                if let column = keys.firstIndex(of: String(character)) {
+                    return (Double(column) + Double(width - keys.count) / 2, Double(row))
+                }
+            }
+            return nil
+        }
+        guard let x = position(source[i]), let y = position(target[i]) else { return 0.95 }
+        return hypot(x.0 - y.0, x.1 - y.1) <= 1.5 ? 0.65 : 0.95
+    }
     public func replacement(for word: String, language: KeyboardLanguage,
                             candidates: [String] = [], isKnownWord: Bool = false) -> String? {
         guard !isKnownWord, (3...24).contains(word.count), word.allSatisfy(\.isLetter),

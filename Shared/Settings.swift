@@ -54,8 +54,7 @@ struct KeyboardSettings {
         result.symbolHints = defaults.object(forKey: "symbolHints") as? Bool ?? true
         result.holdDelay = clampedDelay(defaults.object(forKey: "holdDelay") as? Double ?? 0.4)
         if let values = defaults.stringArray(forKey: "languages") {
-            let languages = values.compactMap(KeyboardLanguage.init(rawValue:))
-            if !languages.isEmpty { result.languages = languages }
+            result.languages = EnabledKeyboardLanguages.normalized(values.compactMap(KeyboardLanguage.init(rawValue:)))
         }
         return result
     }
@@ -64,7 +63,7 @@ struct KeyboardSettings {
         defaults.set(theme.rawValue, forKey: "theme")
         defaults.set(suggestions, forKey: "suggestions")
         defaults.set(autoCapitalization, forKey: "capitalization")
-        defaults.set(languages.map(\.rawValue), forKey: "languages")
+        defaults.set(EnabledKeyboardLanguages.normalized(languages).map(\.rawValue), forKey: "languages")
         defaults.set(autoCorrection, forKey: "autoCorrection")
         defaults.set(compactKeys, forKey: "compactKeys")
         defaults.set(showKeyPreview, forKey: "showKeyPreview")
@@ -79,7 +78,7 @@ struct KeyboardSettings {
         defaults.set(symbolHints, forKey: "symbolHints")
         defaults.set(Self.clampedDelay(holdDelay), forKey: "holdDelay")
     }
-    private static let overrideKeys = ["keyboard.haptics", "keyboard.extraSymbols", "keyboard.symbolHints", "keyboard.holdDelay", "keyboard.autoCorrection", "keyboard.compactKeys", "keyboard.showKeyPreview", "keyboard.doubleSpacePeriod", "keyboard.swipeDeleteWord", "keyboard.glideTyping", "keyboard.personalLexicon", "keyboard.autoCapitalization", "keyboard.touchAdaptationEnabled", "keyboard.debugTouchZones"]
+    private static let overrideKeys = ["keyboard.haptics", "keyboard.extraSymbols", "keyboard.symbolHints", "keyboard.holdDelay", "keyboard.autoCorrection", "keyboard.compactKeys", "keyboard.showKeyPreview", "keyboard.doubleSpacePeriod", "keyboard.swipeDeleteWord", "keyboard.glideTyping", "keyboard.personalLexicon", "keyboard.autoCapitalization", "keyboard.touchAdaptationEnabled", "keyboard.debugTouchZones", "keyboard.languages"]
     /// Extension-local overrides make these controls usable with SideStore even
     /// when the re-signed app cannot share an App Group with its extension.
     static func loadKeyboard(fullAccess: Bool) -> KeyboardSettings {
@@ -99,10 +98,14 @@ struct KeyboardSettings {
         if let v = defaults.object(forKey: overrideKeys[11]) as? Bool { result.autoCapitalization = v }
         if let v = defaults.object(forKey: overrideKeys[12]) as? Bool { result.touchAdaptationEnabled = v }
         if let v = defaults.object(forKey: overrideKeys[13]) as? Bool { result.debugTouchZones = v }
+        if let values = defaults.stringArray(forKey: overrideKeys[14]) {
+            result.languages = EnabledKeyboardLanguages.normalized(values.compactMap(KeyboardLanguage.init(rawValue:)))
+        }
         return result
     }
     func saveKeyboardOverrides() {
         let defaults = UserDefaults.standard
+        defaults.set(EnabledKeyboardLanguages.normalized(languages).map(\.rawValue), forKey: Self.overrideKeys[14])
         defaults.set(autoCapitalization, forKey: Self.overrideKeys[11])
         defaults.set(touchAdaptationEnabled, forKey: Self.overrideKeys[12])
         defaults.set(debugTouchZones, forKey: Self.overrideKeys[13])

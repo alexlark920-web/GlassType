@@ -1,7 +1,7 @@
 import UIKit
 
-/// Neutral translucent caps share the system keyboard material underneath.
-/// Borders and restrained sheen are drawn by KeyButton, without per-key blur.
+/// Semantic tint for native Liquid Glass caps on iOS 26+, with a translucent
+/// fallback on older systems and an opaque accessibility appearance.
 struct KeyboardTheme {
     let key: UIColor
     let function: UIColor

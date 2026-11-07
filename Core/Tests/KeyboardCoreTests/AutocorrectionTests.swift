@@ -3,6 +3,36 @@ import XCTest
 
 final class AutocorrectionTests: XCTestCase {
     private let engine = AutocorrectionEngine()
+    func testRankedCorrectionAcceptsMergedDictionariesWithMoreThanEightGuesses() {
+        let guesses = Array(repeating: AutocorrectionEngine.Candidate("unrelated", frequencyRank: 1), count: 12)
+            + [.init("keyboard", frequencyRank: 8791)]
+        XCTAssertEqual(engine.rankedReplacement(for: "keybaord", language: .english, candidates: guesses), "keyboard")
+    }
+    func testFrequencyCanResolveDominantCandidateButNotNearTies() {
+        XCTAssertEqual(engine.rankedReplacement(for: "hellp", language: .english, candidates: [
+            .init("hello", frequencyRank: 10), .init("help", frequencyRank: 5000), .init("hell", frequencyRank: 8000)
+        ]), "hello")
+        XCTAssertNil(engine.rankedReplacement(for: "hellp", language: .english, candidates: [
+            .init("hello", frequencyRank: 10), .init("help", frequencyRank: 10)
+        ]))
+    }
+    func testRankedCorrectionUsesActualOfflineCorporaForAllLanguages() {
+        for (typo, expected, language) in [("keybaord", "keyboard", KeyboardLanguage.english),
+                                           ("клавиатруа", "клавиатура", .russian), ("клавіатруа", "клавіатура", .ukrainian)] {
+            _ = OfflineLexicon.words(language: language)
+            let check = OfflineLexicon.preparedCheck(typo, language: language)!
+            XCTAssertFalse(check.known)
+            XCTAssertEqual(engine.rankedReplacement(for: typo, language: language, candidates: check.rankedCandidates), expected)
+        }
+    }
+    func testRankedCorrectionProtectsKnownWordsAndIdentifiers() {
+        let candidates = [AutocorrectionEngine.Candidate("hello", frequencyRank: 1)]
+        XCTAssertNil(engine.rankedReplacement(for: "hellp", language: .english, candidates: candidates, isKnownWord: true))
+        for value in ["HELLP", "HeLlP", "hellp1", "user@hellp", "hxxlo"] {
+            XCTAssertNil(engine.rankedReplacement(for: value, language: .english, candidates: candidates))
+        }
+        XCTAssertEqual(engine.rankedReplacement(for: "Keybaord", language: .english, candidates: [.init("keyboard", frequencyRank: 100)]), "Keyboard")
+    }
     func testCommonTyposInAllLanguages() {
         XCTAssertEqual(engine.replacement(for: "teh", language: .english), "the")
         XCTAssertEqual(engine.replacement(for: "helo", language: .english), "hello")

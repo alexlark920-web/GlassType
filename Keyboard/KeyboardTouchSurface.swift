@@ -22,15 +22,25 @@ final class KeyboardTouchSurface: UIView {
     private var configuration = TouchRecognitionConfiguration()
     private var previousBounds: CGRect = .null
     private let debug = TouchZoneOverlay()
+    private var glassContainer: UIVisualEffectView?
     var showsDebugZones = false { didSet { updateDebug() } }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear; isOpaque = false; isMultipleTouchEnabled = true
+        if #available(iOS 26.0, *) {
+            let effect = UIGlassContainerEffect()
+            // Neighbouring caps must stay distinct, even when highlighted.
+            effect.spacing = 0
+            let container = UIVisualEffectView(effect: effect)
+            container.isMultipleTouchEnabled = true
+            addSubview(container); glassContainer = container
+        }
         debug.isUserInteractionEnabled = false; debug.isAccessibilityElement = false
         addSubview(debug)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func addKey(_ button: UIButton) { (glassContainer?.contentView ?? self).addSubview(button) }
     func invalidateGeometry() { revision &+= 1; resetPresses(); previousBounds = .null; setNeedsLayout() }
     func setConfiguration(_ value: TouchRecognitionConfiguration) {
         if value.offsetX != configuration.offsetX || value.offsetY != configuration.offsetY ||
@@ -43,6 +53,7 @@ final class KeyboardTouchSurface: UIView {
     }
     override func layoutSubviews() {
         super.layoutSubviews()
+        glassContainer?.frame = bounds
         guard bounds != previousBounds else { return }
         revision &+= 1; resetPresses()
         previousBounds = bounds

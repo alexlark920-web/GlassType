@@ -20,6 +20,38 @@ final class GlideDecoderTests: XCTestCase {
     func testDirectEnglishPath() {
         XCTAssertEqual(decoder.decode(points: path("hello", language: .english), keyCenters: centers(.english), language: .english).first, "hello")
     }
+    func testNoisyContinuousStrokesOnPortraitAndLandscapeLayouts() {
+        let examples: [(String, KeyboardLanguage)] = [("hello", .english), ("thanks", .english), ("world", .english), ("keyboard", .english),
+            ("привет", .russian), ("как", .russian), ("хорошо", .russian), ("спасибо", .russian),
+            ("привіт", .ukrainian), ("дякую", .ukrainian), ("сьогодні", .ukrainian), ("добре", .ukrainian)]
+        for (word, language) in examples {
+            for size in [CGSize(width: 320, height: 225), CGSize(width: 750, height: 155)] {
+                let layout = KeyboardGeometry.make(bounds: CGRect(origin: .zero, size: size), language: language)
+                let centers = Dictionary(uniqueKeysWithValues: layout.keys.compactMap { key -> (String, CGPoint)? in
+                    guard let text = key.role.character, text.allSatisfy(\.isLetter) else { return nil }
+                    return (text, key.center)
+                })
+                let anchors = word.map { centers[String($0)]! }
+                var trace: [CGPoint] = []
+                for (index, pair) in zip(anchors, anchors.dropFirst()).enumerated() {
+                    for step in 0..<16 {
+                        let t = CGFloat(step) / 16
+                        trace.append(CGPoint(x: pair.0.x + (pair.1.x - pair.0.x) * t + layout.pitch.width * 0.15 + 1.4 * sin(t * .pi * 2 + CGFloat(index)),
+                                             y: pair.0.y + (pair.1.y - pair.0.y) * t - layout.pitch.height * 0.10 + 1.2 * cos(t * .pi * 2)))
+                    }
+                }
+                trace.append(CGPoint(x: anchors.last!.x + layout.pitch.width * 0.15, y: anchors.last!.y - layout.pitch.height * 0.10))
+                XCTAssertTrue(decoder.decode(points: trace, keyCenters: centers, language: language).contains(word), "\(word) \(size)")
+            }
+        }
+    }
+    func testDwellJitterDoesNotTurnAWordIntoAnOverlongPath() {
+        let geometry = centers(.english), start = geometry["h"]!
+        let dwell = (0..<100).map { index in
+            CGPoint(x: start.x + 1.6 * sin(CGFloat(index)), y: start.y + 1.6 * cos(CGFloat(index)))
+        }
+        XCTAssertEqual(decoder.decode(points: dwell + path("hello", language: .english), keyCenters: geometry, language: .english).first, "hello")
+    }
     func testDirectRussianPath() {
         XCTAssertEqual(decoder.decode(points: path("привет", language: .russian), keyCenters: centers(.russian), language: .russian).first, "привет")
     }

@@ -21,9 +21,13 @@ public struct GlideDecoder {
             guard source.x.isFinite, source.y.isFinite else { return [] }
             let p = geometry.normalize(source)
             guard geometry.contains(p) else { return [] }
-            if let previous = raw.last, previous.distance(to: p) < 0.025 { continue }
+            if let previous = raw.last, previous.distance(to: p) < 0.055 { continue }
             raw.append(p)
         }
+        // Distance filtering removes dwell jitter without rounding away the
+        // corners that distinguish words. Keep both contact endpoints exactly.
+        if let end = points.last.map(geometry.normalize), let previous = raw.last, previous.distance(to: end) > 0.001 { raw.append(end) }
+        raw = simplify(raw, tolerance: 0.065)
         guard raw.count >= 2, let first = raw.first, let last = raw.last else { return [] }
         let observedLength = pathLength(raw)
         guard observedLength >= 0.55, observedLength <= 110 else { return [] }
@@ -78,7 +82,7 @@ public struct GlideDecoder {
         }
         shortlist.sort { $0.coarse == $1.coarse ? $0.word < $1.word : $0.coarse < $1.coarse }
         var ranked: [(word: String, score: Double)] = []
-        for item in shortlist.prefix(160) {
+        for item in shortlist.prefix(128) {
             let ideal = resample(item.template, count: observed.count)
             let direct = meanDistance(observed, ideal)
             let warped = alignmentCost(observed, ideal)
@@ -219,12 +223,13 @@ public struct GlideDecoder {
     }
     private func keyCoverage(_ keys: [Point], trace: [Point]) -> Double {
         keys.reduce(0) { total, key in
-            let minimum = zip(trace, trace.dropFirst()).map { start, end -> Double in
+            var minimum = 10.0
+            for (start, end) in zip(trace, trace.dropFirst()) {
                 let dx = end.x - start.x, dy = end.y - start.y
                 let squared = dx * dx + dy * dy
                 let t = squared > 0 ? min(1, max(0, ((key.x - start.x) * dx + (key.y - start.y) * dy) / squared)) : 0
-                return key.distance(to: Point(x: start.x + t * dx, y: start.y + t * dy))
-            }.min() ?? 10
+                minimum = min(minimum, key.distance(to: Point(x: start.x + t * dx, y: start.y + t * dy)))
+            }
             return total + minimum
         } / Double(max(1, keys.count))
     }
@@ -232,15 +237,37 @@ public struct GlideDecoder {
         let count = observed.count
         guard count > 0, ideal.count == count else { return .infinity }
         var previous = Array(repeating: Double.infinity, count: count + 1)
+        var current = previous
         previous[0] = 0
         for i in 1...count {
-            var current = Array(repeating: Double.infinity, count: count + 1)
+            for column in current.indices { current[column] = .infinity }
             for j in max(1, i - 9)...min(count, i + 9) {
                 let d = observed[i - 1].distance(to: ideal[j - 1])
                 current[j] = d * d + min(previous[j - 1], min(previous[j], current[j - 1]))
             }
-            previous = current
+            swap(&previous, &current)
         }
         return (previous[count] / Double(count * 2)).squareRoot()
+    }
+
+    private func simplify(_ points: [Point], tolerance: Double) -> [Point] {
+        guard points.count > 3 else { return points }
+        var keep = Array(repeating: false, count: points.count)
+        keep[0] = true; keep[points.count - 1] = true
+        var segments = [(0, points.count - 1)]
+        while let (start, end) = segments.popLast() {
+            guard end > start + 1 else { continue }
+            let a = points[start], b = points[end]
+            let dx = b.x - a.x, dy = b.y - a.y, squared = dx * dx + dy * dy
+            var maximum = tolerance, selected: Int?
+            for index in (start + 1)..<end {
+                let p = points[index]
+                let t = squared > 0 ? min(1, max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / squared)) : 0
+                let distance = p.distance(to: Point(x: a.x + t * dx, y: a.y + t * dy))
+                if distance > maximum { maximum = distance; selected = index }
+            }
+            if let selected { keep[selected] = true; segments.append((start, selected)); segments.append((selected, end)) }
+        }
+        return points.indices.compactMap { keep[$0] ? points[$0] : nil }
     }
 }
