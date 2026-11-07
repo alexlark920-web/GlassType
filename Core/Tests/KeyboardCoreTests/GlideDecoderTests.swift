@@ -36,8 +36,12 @@ final class GlideDecoderTests: XCTestCase {
                 for (index, pair) in zip(anchors, anchors.dropFirst()).enumerated() {
                     for step in 0..<16 {
                         let t = CGFloat(step) / 16
-                        trace.append(CGPoint(x: pair.0.x + (pair.1.x - pair.0.x) * t + layout.pitch.width * 0.15 + 1.4 * sin(t * .pi * 2 + CGFloat(index)),
-                                             y: pair.0.y + (pair.1.y - pair.0.y) * t - layout.pitch.height * 0.10 + 1.2 * cos(t * .pi * 2)))
+                        let wave = t * CGFloat.pi * 2
+                        let dx = layout.pitch.width * 0.15 + 1.4 * sin(wave + CGFloat(index))
+                        let dy = -layout.pitch.height * 0.10 + 1.2 * cos(wave)
+                        let x = pair.0.x + (pair.1.x - pair.0.x) * t + dx
+                        let y = pair.0.y + (pair.1.y - pair.0.y) * t + dy
+                        trace.append(CGPoint(x: x, y: y))
                     }
                 }
                 trace.append(CGPoint(x: anchors.last!.x + layout.pitch.width * 0.15, y: anchors.last!.y - layout.pitch.height * 0.10))

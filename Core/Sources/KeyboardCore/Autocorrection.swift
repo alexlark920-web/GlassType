@@ -30,10 +30,18 @@ public struct AutocorrectionEngine {
                 if let rank, rank < (existing.frequencyRank ?? Int.max) { matches[text] = Candidate(text, frequencyRank: rank) }
             } else { matches[text] = Candidate(text, frequencyRank: rank) }
         }
-        let ranked = matches.map { text, candidate -> (word: String, score: Double) in
-            let prior = candidate.frequencyRank.map { 0.15 * log(Double($0) + 16) } ?? 1.35
-            return (text, editCost(lower, text, language: language) + prior)
-        }.sorted { $0.score == $1.score ? $0.word < $1.word : $0.score < $1.score }
+        var ranked: [(word: String, score: Double)] = []
+        for (text, candidate) in matches {
+            let prior: Double
+            if let rank = candidate.frequencyRank { prior = 0.15 * log(Double(rank) + 16.0) }
+            else { prior = 1.35 }
+            let score = editCost(lower, text, language: language) + prior
+            ranked.append((word: text, score: score))
+        }
+        ranked.sort { left, right in
+            if left.score == right.score { return left.word < right.word }
+            return left.score < right.score
+        }
         guard let best = ranked.first, best.score <= 2.65 else { return nil }
         if ranked.count > 1, ranked[1].score - best.score < 0.18 { return nil }
         return word == lower.capitalized ? best.word.capitalized : best.word
