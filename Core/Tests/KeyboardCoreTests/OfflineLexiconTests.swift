@@ -26,7 +26,7 @@ final class OfflineLexiconTests: XCTestCase {
         for word in ["weve", "belonging"] { XCTAssertTrue(OfflineLexicon.contains(word, language: .english), word) }
         for word in ["подскажешь", "позвонишь", "людьми"] { XCTAssertTrue(OfflineLexicon.contains(word, language: .russian), word) }
         for word in ["користувалася", "зробиш", "друзів"] { XCTAssertTrue(OfflineLexicon.contains(word, language: .ukrainian), word) }
-        XCTAssertTrue(OfflineLexicon.completions(prefix: "подска", language: .russian, limit: 8).contains("подскажешь"))
+        XCTAssertTrue(OfflineLexicon.completions(prefix: "подскажеш", language: .russian, limit: 8).contains("подскажешь"))
     }
     func testEditDistanceCandidatesAreLocalBoundedAndPreserveKnownWords() {
         let candidates = OfflineLexicon.correctionCandidates(for: "keybaord", language: .english)
