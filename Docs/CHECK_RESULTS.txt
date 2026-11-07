@@ -1,5 +1,33 @@
-GlassType 1.7 build 15 — проверка иконок в процессе.
-Добавлены AppIcon Any/Dark 1024x1024 RGB и каталог ресурсов основного приложения.
-Структурная проверка PNG/каталога/настроек Xcode выполнена локально.
-Ожидаются XCTest, simulator build, device archive и проверка Assets.car.
-Клавиатурные Swift-файлы совпадают с подтверждённой build 14 (143 теста).
+GlassType 1.7 (15) — фактическая проверка 2026-11-07
+
+Проверенный код: 572a346cd94b488ae8fbdf5e2d80b69b3fcda608
+GitHub Actions: https://github.com/alexlark920-web/GlassType/actions/runs/42338499265
+Job: 128300732817; conclusion: success.
+Среда: macos-15, Xcode 26.3, iOS/iOS Simulator SDK 26.2.
+
+PASS — Scripts/validate_project.py: структура Xcode, 56 объектов, два target,
+       файлы и словари, каталог AppIcon в ресурсах App, настройки Debug/Release.
+PASS — два AppIcon PNG: 1024x1024, 8-bit RGB, без alpha; Any/Light и Dark slots.
+PASS — swift test (KeyboardCore): 143 XCTest, 0 failures.
+PASS — xcodebuild, generic iOS Simulator: BUILD SUCCEEDED.
+PASS — xcodebuild archive, generic iOS device/Release: ARCHIVE SUCCEEDED.
+PASS — проверка архива: встроенный GlassTypeKeyboard.appex и три локальных словаря.
+PASS — скомпилированный CFBundleIcons/CFBundlePrimaryIcon с AppIcon,
+       fallback-файлы, Assets.car с тёмным appearance (проверено assetutil).
+PASS — упаковка unsigned IPA и загрузка artifact GlassType-unsigned-IPA.
+
+Артефакт: https://github.com/alexlark920-web/GlassType/actions/runs/42338499265/artifacts/13560024333
+Размер ZIP артефакта: 4,249,762 bytes (это размер ZIP, не отдельного IPA).
+SHA256 ZIP: f850ed1a4ac4989e61f5bd2c98bb9189c5aa84d4e9c82be4514318c48163fad0
+Хранится до 2026-11-14. Для загрузки нужен вход в аккаунт с доступом к репозиторию.
+Внутри ZIP — GlassType-unsigned.ipa; при установке в SideStore сохранить extension.
+
+Существующие предупреждения: устаревшие UIButton contentEdgeInsets/titleEdgeInsets;
+AppIntents metadata extraction пропущен, поскольку AppIntents не используется;
+предупреждения Node.js в upload-artifact. Ошибок компиляции/тестов нет.
+
+Проверки iPhone/iOS 27 на физическом устройстве не выполнялись. CI подтверждает
+компиляцию и содержимое архива, но не наблюдаемое переключение значка на Home Screen,
+субъективную отзывчивость клавиатуры или точность свайпа на реальных касаниях.
+Клавиатурные Swift-файлы в обновлении иконок не менялись относительно build 14.
+Финальный коммит документации и копии ZIP не меняет проверенные входы сборки.

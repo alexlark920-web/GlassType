@@ -29,6 +29,11 @@ alpha-канала. Сборка Xcode компилирует каталог; у
 иконку в Info.plist, fallback-файлы и тёмное appearance в Assets.car. Фактический
 результат конкретной сборки — в [CHECK_RESULTS.txt](CHECK_RESULTS.txt).
 
+Build 15 проверена в [GitHub Actions](https://github.com/alexlark920-web/GlassType/actions/runs/42338499265):
+143 теста без ошибок, сборка симулятора и архив устройства успешны; проверка
+`Assets.car` подтвердила тёмный вариант. Переключение на физическом iPhone пока
+не проверено. [Скачать ZIP с unsigned IPA](https://github.com/alexlark920-web/GlassType/actions/runs/42338499265/artifacts/13560024333).
+
 Руководства Apple: [Configuring your app icon using an asset catalog](https://developer.apple.com/documentation/xcode/configuring-your-app-icon),
 [App icons](https://developer.apple.com/design/human-interface-guidelines/app-icons),
 [Customize apps and widgets on the Home Screen](https://support.apple.com/guide/iphone/iph385473442/ios).
