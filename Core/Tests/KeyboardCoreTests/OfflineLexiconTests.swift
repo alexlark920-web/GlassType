@@ -4,8 +4,8 @@ import XCTest
 
 final class OfflineLexiconTests: XCTestCase {
     func testAllResourcesAreBundledAndContainLargeRealCorpora() {
-        XCTAssertGreaterThanOrEqual(OfflineLexicon.words(language: .english).count, 30_000)
-        XCTAssertGreaterThanOrEqual(OfflineLexicon.words(language: .russian).count, 30_000)
+        XCTAssertGreaterThanOrEqual(OfflineLexicon.words(language: .english).count, 48_000)
+        XCTAssertGreaterThanOrEqual(OfflineLexicon.words(language: .russian).count, 48_000)
         XCTAssertGreaterThan(OfflineLexicon.words(language: .ukrainian).count, 25_000)
         for language in KeyboardLanguage.allCases {
             let words = OfflineLexicon.words(language: language)
@@ -20,6 +20,13 @@ final class OfflineLexiconTests: XCTestCase {
         XCTAssertTrue(OfflineLexicon.contains("HELLO", language: .english))
         XCTAssertFalse(OfflineLexicon.contains("this-is-not-a-real-word-123", language: .english))
         XCTAssertFalse(OfflineLexicon.contains("привет", language: .ukrainian))
+    }
+    func testExpandedCorpusIncludesLongTailInflectionsAndCaseForms() {
+        // These are common inflected forms beyond the previous 30k EN/RU cap.
+        for word in ["weve", "belonging"] { XCTAssertTrue(OfflineLexicon.contains(word, language: .english), word) }
+        for word in ["подскажешь", "позвонишь", "людьми"] { XCTAssertTrue(OfflineLexicon.contains(word, language: .russian), word) }
+        for word in ["користувалася", "зробиш", "друзів"] { XCTAssertTrue(OfflineLexicon.contains(word, language: .ukrainian), word) }
+        XCTAssertTrue(OfflineLexicon.completions(prefix: "подска", language: .russian, limit: 8).contains("подскажешь"))
     }
     func testEditDistanceCandidatesAreLocalBoundedAndPreserveKnownWords() {
         let candidates = OfflineLexicon.correctionCandidates(for: "keybaord", language: .english)

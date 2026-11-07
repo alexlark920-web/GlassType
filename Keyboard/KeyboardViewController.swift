@@ -2257,8 +2257,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private func accept(_ word: String, prefix: String) {
         if pendingInput.deferIfBusy(.suggestion(word, prefix)) { return }
         // Recheck host context: a selection or cursor move invalidates the candidate.
-        guard pendingPrefix == prefix, let context = textDocumentProxy.documentContextBeforeInput,
-              LocalSuggestionProvider.trailingWord(in: context) == prefix,
+        guard pendingPrefix == prefix,
+              let context = SuggestionAcceptanceContext.precedingContext(
+                prefix: prefix, documentContext: textDocumentProxy.documentContextBeforeInput),
               (textDocumentProxy.selectedText ?? "").isEmpty else { updateContext(); return }
         correctionUndo = nil; suppressedCorrection = nil
         completedWord = nil; lastSpace = nil; deletionUndo = nil; glideWords = []; glideUndo = nil

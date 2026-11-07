@@ -18,6 +18,7 @@ SOURCE_HASHES = {
     "uk_UA.dic": "ff848bbb610332bec2fa867f91d7489154c3585d",
     "uk_UA.aff": "2a604054953b9997b1b7250427fb244736a1c66b",
 }
+MAX_CORPUS_WORDS = 50_000
 
 def normalize(word):
     return word.lower().translate(str.maketrans({"’": "'", "ʼ": "'", "‘": "'", "‑": "-"}))
@@ -45,7 +46,7 @@ def main():
             if language == "uk" and not uk_dictionary.lookup(word):
                 continue
             words.append(word); seen.add(word)
-            if len(words) == 30000:
+            if len(words) == MAX_CORPUS_WORDS:
                 break
         extras = [normalize(word) for word in supplements[language] if normalize(word) not in seen]
         assert all(pattern.fullmatch(word) and 2 <= len(word) <= 24 for word in extras)

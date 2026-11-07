@@ -15,8 +15,8 @@ public enum OfflineLexicon {
             var list: [String] = []
             var index: [String: Int] = [:]
             var groups: [String: [Int32]] = [:]
-            list.reserveCapacity(31_000); index.reserveCapacity(31_000); groups.reserveCapacity(1000)
-            let bundled = content.split(whereSeparator: { $0.isNewline }).prefix(31_000).map { String($0) }
+            list.reserveCapacity(51_000); index.reserveCapacity(51_000); groups.reserveCapacity(1000)
+            let bundled = content.split(whereSeparator: { $0.isNewline }).prefix(51_000).map { String($0) }
             for word in (bundled + SupplementalVocabulary.words(for: language)) {
                 guard (2...24).contains(word.count), index[word] == nil else { continue }
                 let position = Int32(list.count)

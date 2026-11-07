@@ -1,6 +1,6 @@
 GlassType offline lexicons — data attribution
 
-English: 30,028 words. Russian: 30,067 words. Ukrainian: 27,317 words.
+English: 48,416 words. Russian: 48,771 words. Ukrainian: 27,340 words.
 Frequency order is preserved after normalization, alphabet/length filtering,
 deduplication and the Ukrainian spelling-validation step.
 These are statistical subtitle corpora, not exhaustive normative dictionaries.
@@ -14,9 +14,11 @@ The full legal code is included in CC-BY-SA-4.0.txt.
 The MIT license in the upstream repository applies to its code, not its data.
 Changes by GlassType contributors, 2026: lowercase/NFC punctuation normalization;
 2–24 characters; language alphabets; no mixed scripts or digits; English/Russian
-capped at 30,000; Ukrainian candidates validated with Hunspell-compatible lookup.
+capped at 50,000 source entries; filtering leaves the counts above. Ukrainian
+candidates are validated with Hunspell-compatible lookup.
 No user input or network downloads are used at runtime.
-Supplement: 157 original modern keyboard/software terms and inflected forms,
+Supplement: 197 original modern keyboard/software terms and inflected forms not
+already present in the expanded frequency lists,
 reviewed by GlassType contributors, 2026, published under CC BY-SA 4.0.
 The supplemental source is Scripts/lexicon_supplements.json. It is appended
 without changing subtitle corpus ranks; it is not claimed as Hunspell output.

@@ -9,14 +9,14 @@
   },
   "languages": {
     "en": {
-      "words": 30046,
-      "supplemental": 46,
-      "sha256": "7bad21792d896922c2180560258a50f2e0534fe9b0014e217a3721389a3c4841"
+      "words": 48416,
+      "supplemental": 30,
+      "sha256": "17f698f81e92517677f2dd9366bd674281f7ee2e85cc9bfa97eda2e786c3b91b"
     },
     "ru": {
-      "words": 30088,
-      "supplemental": 88,
-      "sha256": "a97ed64796cfedae4c218f9e2f171886919c75abe6279818a9274d531f495a84"
+      "words": 48771,
+      "supplemental": 82,
+      "sha256": "9689c0f24d4c5c2b337954a204f2ff33fac3d331e650a092a37618263cb44745"
     },
     "uk": {
       "words": 27340,

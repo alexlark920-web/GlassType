@@ -92,6 +92,16 @@ final class KeyboardCoreTests: XCTestCase {
         XCTAssertEqual(provider.suggestions(context: "HE", language: .english), ["here", "her", "hey"])
         XCTAssertTrue(provider.suggestions(context: String(repeating: "a", count: 100_000), language: .english).isEmpty)
     }
+    func testNextWordSuggestionCanBeAcceptedWithoutDocumentPrefix() {
+        XCTAssertEqual(SuggestionAcceptanceContext.precedingContext(prefix: "", documentContext: nil), "")
+        XCTAssertEqual(SuggestionAcceptanceContext.precedingContext(prefix: "", documentContext: "Hello! "), "Hello! ")
+        XCTAssertNil(SuggestionAcceptanceContext.precedingContext(prefix: "", documentContext: "unfinished"))
+    }
+    func testPrefixSuggestionAcceptanceRevalidatesLiveContext() {
+        XCTAssertEqual(SuggestionAcceptanceContext.precedingContext(prefix: "hel", documentContext: "Say hel"), "Say ")
+        XCTAssertNil(SuggestionAcceptanceContext.precedingContext(prefix: "hel", documentContext: "Say help"))
+        XCTAssertNil(SuggestionAcceptanceContext.precedingContext(prefix: "hel", documentContext: nil))
+    }
     func testSupplementalSlangParticipatesInSuggestions() {
         let provider = LocalSuggestionProvider()
         XCTAssertTrue(provider.suggestions(context: "try rizz", language: .english).contains("rizzler"))
