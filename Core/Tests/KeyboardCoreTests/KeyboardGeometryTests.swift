@@ -62,7 +62,7 @@ final class KeyboardGeometryTests: XCTestCase {
         XCTAssertEqual(layout.keys[layout.cellIndex(at: point)!].row, 1)
     }
     func testInvalidBoundsAreRejectedAndVisualStyleDoesNotAffectCells() {
-        XCTAssertTrue(KeyboardGeometry.make(bounds: CGRect(x: 0, y: 0, width: .nan, height: 220), language: .english).keys.isEmpty)
+        XCTAssertTrue(KeyboardGeometry.make(bounds: CGRect(x: 0, y: 0, width: CGFloat.nan, height: 220), language: .english).keys.isEmpty)
         XCTAssertTrue(KeyboardGeometry.make(bounds: .zero, language: .english).keys.isEmpty)
         let compact = KeyboardGeometry.make(bounds: CGRect(x: 0, y: 0, width: 390, height: 220), language: .russian)
         let large = KeyboardGeometry.make(bounds: compact.bounds, language: .russian, compact: false)
