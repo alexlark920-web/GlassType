@@ -47,4 +47,13 @@ final class EmojiCatalogTests: XCTestCase {
         XCTAssertEqual(EmojiVariants.choices(for: "👍", among: items).map(\.emoji), ["👍", "👍🏻", "👍🏽"])
         XCTAssertEqual(EmojiVariants.collapsed(items, preferred: ["👍": "👍🏽"]).map(\.emoji), ["👍🏽"])
     }
+
+    func testBundledPickerHasOneEntryPerBaseGlyphIncludingMixedHandshakeTones() {
+        let items = EmojiCatalog.bundled().sections.flatMap(\.entries)
+        let collapsed = EmojiVariants.collapsed(items)
+        XCTAssertEqual(collapsed.count, Set(collapsed.map { EmojiVariants.base(of: $0.emoji) }).count)
+        let handshakes = EmojiVariants.choices(for: "🤝", among: items)
+        XCTAssertTrue(handshakes.contains { $0.emoji.contains("🫱🏻‍🫲🏿") })
+        XCTAssertEqual(EmojiVariants.collapsed(handshakes).count, 1)
+    }
 }

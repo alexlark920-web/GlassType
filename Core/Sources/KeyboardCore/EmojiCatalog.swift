@@ -49,7 +49,10 @@ public struct EmojiItem: Equatable, Hashable, Identifiable {
 /// tone by default; callers can persist the selected sequence per base glyph.
 public enum EmojiVariants {
     public static func base(of emoji: String) -> String {
-        String(String.UnicodeScalarView(emoji.unicodeScalars.filter { !(0x1F3FB...0x1F3FF).contains($0.value) }))
+        if emoji.contains("🫱") && emoji.contains("🫲") { return "🤝" }
+        return String(String.UnicodeScalarView(emoji.unicodeScalars.filter {
+            !(0x1F3FB...0x1F3FF).contains($0.value) && $0.value != 0xFE0E && $0.value != 0xFE0F
+        }))
     }
 
     public static func collapsed(_ items: [EmojiItem], preferred: [String: String] = [:]) -> [EmojiItem] {

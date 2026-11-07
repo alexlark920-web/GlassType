@@ -251,6 +251,9 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
                         point: CGPoint) -> UIContextMenuConfiguration? {
         guard visibleItems.indices.contains(indexPath.item) else { return nil }
         let item = visibleItems[indexPath.item]
+        if EmojiVariants.base(of: item.emoji) == "🤝" {
+            return handshakeConfiguration(item: item)
+        }
         let choices = EmojiVariants.choices(for: item.emoji, among: allItems)
         guard choices.count > 1 else { return nil }
         return UIContextMenuConfiguration(identifier: item.emoji as NSString, previewProvider: nil) { [weak self] _ in
@@ -263,6 +266,39 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
                     self?.onSelectEmoji?(choice.emoji)
                 }
             })
+        }
+    }
+
+    private func handshakeConfiguration(item: EmojiItem) -> UIContextMenuConfiguration {
+        let tones: [(String, UInt32)] = [("Default", 0), ("🏻", 0x1F3FB), ("🏼", 0x1F3FC), ("🏽", 0x1F3FD), ("🏾", 0x1F3FE), ("🏿", 0x1F3FF)]
+        func sequence(_ left: UInt32, _ right: UInt32) -> String {
+            var scalars = String.UnicodeScalarView()
+            scalars.append(UnicodeScalar(0x1FAF1)!)
+            if left != 0 { scalars.append(UnicodeScalar(left)!) }
+            scalars.append(UnicodeScalar(0x200D)!)
+            scalars.append(UnicodeScalar(0x1FAF2)!)
+            if right != 0 { scalars.append(UnicodeScalar(right)!) }
+            return String(scalars)
+        }
+        func toneMenu(_ title: String, choosingLeft: Bool) -> UIMenu {
+            UIMenu(title: title, children: tones.map { (label, scalar) in
+                UIAction(title: scalar == 0 ? "🫱  🫲" : "🫱" + label + "  🫲" + label) { [weak self] _ in
+                    var selected = UserDefaults.standard.dictionary(forKey: "GlassType.handshakeToneDefaults") as? [String: Int] ?? [:]
+                    selected[choosingLeft ? "left" : "right"] = Int(scalar)
+                    UserDefaults.standard.set(selected, forKey: "GlassType.handshakeToneDefaults")
+                    let left = choosingLeft ? scalar : UInt32(selected["left"] ?? 0)
+                    let right = choosingLeft ? UInt32(selected["right"] ?? 0) : scalar
+                    let emoji = sequence(left, right)
+                    var preferred = UserDefaults.standard.dictionary(forKey: "GlassType.emojiToneDefaults") as? [String: String] ?? [:]
+                    preferred[EmojiVariants.base(of: "🤝")] = emoji
+                    UserDefaults.standard.set(preferred, forKey: "GlassType.emojiToneDefaults")
+                    self?.grid.reloadData()
+                    self?.onSelectEmoji?(emoji)
+                }
+            })
+        }
+        return UIContextMenuConfiguration(identifier: item.emoji as NSString, previewProvider: nil) { _ in
+            UIMenu(title: item.name, children: [toneMenu("Left hand", choosingLeft: true), toneMenu("Right hand", choosingLeft: false)])
         }
     }
 
