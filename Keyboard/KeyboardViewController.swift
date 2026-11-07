@@ -1909,7 +1909,14 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         correctionUndo = nil
         if text.contains(where: { $0.isLetter }) { suppressedCorrection = nil }
-        textDocumentProxy.insertText(state.inserted(text))
+        let beforeInput = textDocumentProxy.documentContextBeforeInput
+        let automaticSpace = text.allSatisfy(\.isLetter) && textAllowsAutomation
+            ? PunctuationSpacing.prefixBeforeLetter(after: beforeInput) : ""
+        if !automaticSpace.isEmpty {
+            state.synchronize(context: (beforeInput ?? "") + automaticSpace,
+                              autoCapitalization: settings.autoCapitalization && textAllowsAutomation)
+        }
+        textDocumentProxy.insertText(automaticSpace + state.inserted(text))
         if text == " " { rememberSpace() }
         if [" ", "\n", ".", ",", "!", "?", ":", ";"].contains(text) { learnCompletedWord(endingWith: text) }
         updateContext()

@@ -3,6 +3,21 @@ import XCTest
 @testable import KeyboardCore
 
 final class TypingConveniencesTests: XCTestCase {
+    func testLetterAfterClosingPunctuationGetsOneSpace() {
+        for mark in [".", ",", "!", "?", ":", ";", "…", ")", "]", "}", "»", "”", "%"] {
+            XCTAssertEqual(PunctuationSpacing.prefixBeforeLetter(after: "Привет" + mark), " ", mark)
+        }
+        XCTAssertEqual(PunctuationSpacing.prefixBeforeLetter(after: "Hello. "), "")
+        XCTAssertEqual(PunctuationSpacing.prefixBeforeLetter(after: nil), "")
+    }
+    func testLetterSpacingPreservesOpenersAndWordJoiners() {
+        for ending in ["(", "[", "{", "«", "“", "-", "—", "'", "’", "/", ""] {
+            XCTAssertEqual(PunctuationSpacing.prefixBeforeLetter(after: ending), "", ending)
+        }
+        XCTAssertEqual(PunctuationSpacing.prefixBeforeLetter(after: "example.com"), "")
+        XCTAssertEqual(PunctuationSpacing.prefixBeforeLetter(after: "user@example.com"), "")
+        XCTAssertEqual(PunctuationSpacing.prefixBeforeLetter(after: "https://example.com."), "")
+    }
     func testDoubleSpaceAfterWordsInAllLanguages() {
         for text in ["Hello ", "Привет ", "Привіт ", "I ", "«привет ", "don’t ", "п'ять "] {
             XCTAssertEqual(SmartDoubleSpace.replacement(contextBeforeInput: text, elapsedSincePreviousSpace: 0.2), ". ", text)

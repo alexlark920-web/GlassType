@@ -18,6 +18,30 @@ public enum SmartDoubleSpace {
     }
 }
 
+public enum PunctuationSpacing {
+    private static let closingMarks = Set(".,!?;:…)]}»”٪%")
+
+    /// Adds a word boundary before a letter after sentence punctuation or a
+    /// closing delimiter. Opening marks, apostrophes and word-joining hyphens
+    /// deliberately do not create a space.
+    public static func prefixBeforeLetter(after context: String?) -> String {
+        guard let context, let last = context.last, !last.isWhitespace else { return "" }
+        if last == "." {
+            let token = String(context.suffix(64).split(whereSeparator: { $0.isWhitespace }).last ?? "")
+            // Avoid breaking a URL, email, or dotted identifier while it is
+            // still being typed. Plain sentence-final dots are separated.
+            if token.contains("@") || token.contains("://") || token.dropLast().contains(".") { return "" }
+            return " "
+        }
+        if closingMarks.contains(last) { return " " }
+        if last == "\"", let beforeQuote = context.dropLast().last,
+           beforeQuote.isLetter || beforeQuote.isNumber || ".!?…)]}".contains(beforeQuote) {
+            return " "
+        }
+        return ""
+    }
+}
+
 public struct WordDeletionPlan {
     public let deletedText: String
     public var characterCount: Int { deletedText.count }
