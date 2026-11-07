@@ -17,14 +17,6 @@ public enum KeyboardLanguage: String, CaseIterable, Codable {
         return common[key] ?? []
     }
 }
-public enum KeyboardLayout {
-    /// Compact, offline starter emoji layout. Symbols are committed as grapheme clusters.
-    public static let emojiRows: [[String]] = [
-        ["🙂", "😀", "😃", "😂", "🤣", "😊", "😍", "🥰", "😘", "😉"],
-        ["🤔", "😎", "😭", "😅", "🙃", "😴", "🤗", "😡", "😱", "🤩"],
-        ["👍", "👎", "👏", "🙌", "🙏", "❤️", "🔥", "🎉"]
-    ]
-}
 public enum ShiftState: Equatable { case off, once, locked }
 public struct InputState {
     public var language: KeyboardLanguage

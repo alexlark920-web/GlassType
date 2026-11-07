@@ -132,5 +132,17 @@ for language in ['en', 'ru', 'uk']:
     require(hashlib.sha256(data).hexdigest() == manifest['languages'][language]['sha256'], f'{language}: corpus changed')
 for name in ['Dictionary-Attribution.txt', 'CC-BY-SA-4.0.txt', 'MPL-1.1.txt']:
     require((resources / name).is_file(), f'Missing license {name}')
+emoji_manifest = json.loads((resources / 'emoji_catalog-manifest.json').read_text())
+emoji_data = (resources / 'emoji_catalog.tsv').read_bytes()
+emoji_rows = [line.split('\t') for line in emoji_data.decode('utf-8').splitlines() if line and not line.startswith('#')]
+emoji_sequences = [row[1] for row in emoji_rows if len(row) == 3]
+require(emoji_manifest['unicodeVersion'] == '18.0', 'Unexpected Unicode emoji version')
+require(emoji_manifest['emojiCount'] == 3972 and len(emoji_rows) == 3972, 'Unexpected emoji catalog size')
+require(len(emoji_sequences) == len(set(emoji_sequences)), 'Duplicate emoji sequence')
+require(hashlib.sha256(emoji_data).hexdigest() == emoji_manifest['sha256'], 'Emoji catalog checksum mismatch')
+require(emoji_manifest['fullyQualifiedCount'] == 3963 and emoji_manifest['componentCount'] == 9, 'Emoji catalog status counts changed')
+require((ROOT / 'Docs/Unicode/emoji-test-18.0.txt.gz').is_file(), 'Missing attributed Unicode emoji source data')
+require((ROOT / 'Scripts/build_emoji_catalog.py').is_file(), 'Missing emoji catalog generator')
 print(f'PASS: parsed Xcode project; {len(objects)} objects; 2 targets; source membership, local package, embed phase, plists, entitlements, privacy manifests and scheme references.')
+print(f'PASS: bundled Unicode Emoji {emoji_manifest["unicodeVersion"]} catalog: {len(emoji_sequences)} unique entries, checksum verified.')
 print('LIMIT: structural checks only. Swift tests, type checking, Xcode build, signing and device behavior have NOT been verified.')

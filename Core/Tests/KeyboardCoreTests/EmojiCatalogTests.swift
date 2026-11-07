@@ -1,0 +1,32 @@
+import XCTest
+@testable import KeyboardCore
+
+final class EmojiCatalogTests: XCTestCase {
+    func testBundledCatalogContainsUnicodeEmojiAndComponentsInDisplayOrder() {
+        let catalog = EmojiCatalog.bundled()
+        XCTAssertEqual(catalog.unicodeVersion, "18.0")
+        XCTAssertEqual(catalog.count, 3972)
+        XCTAssertEqual(catalog.sections.map(\.category), EmojiCategory.allCases)
+        XCTAssertEqual(Set(catalog.sections.flatMap(\.entries).map(\.emoji)).count, catalog.count)
+        XCTAssertTrue(catalog.sections.allSatisfy { !$0.entries.isEmpty })
+    }
+
+    func testCatalogIncludesJoinedFamilySkinToneFlagsAndNewestEmoji() {
+        let entries = Set(EmojiCatalog.bundled().sections.flatMap(\.entries).map(\.emoji))
+        for value in ["👨‍👩‍👧‍👦", "👩🏽‍💻", "🏳️‍🌈", "🇺🇦", "🫩", "🫆"] {
+            XCTAssertTrue(entries.contains(value), "Missing emoji sequence: \(value)")
+        }
+    }
+
+    func testCategoryLabelsAndIconsAreDefinedForAllSections() {
+        XCTAssertEqual(EmojiCategory.allCases.count, 10)
+        XCTAssertTrue(EmojiCategory.allCases.allSatisfy { !$0.titleKey.isEmpty && !$0.symbolName.isEmpty })
+        XCTAssertEqual(EmojiCategory.smileys.titleKey, "Смайлы и эмоции")
+        XCTAssertEqual(EmojiCategory.flags.symbolName, "flag.fill")
+        XCTAssertTrue(EmojiCatalog.bundled().sections.contains { $0.category == .components && $0.entries.count == 9 })
+        for category in EmojiCategory.allCases {
+            XCTAssertNotEqual(GlassTypeText.translate(category.titleKey, to: .english), category.titleKey)
+            XCTAssertNotEqual(GlassTypeText.translate(category.titleKey, to: .ukrainian), category.titleKey)
+        }
+    }
+}

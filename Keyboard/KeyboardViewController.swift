@@ -438,6 +438,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private let toolbar = UIStackView()
     private let pasteTarget = KeyboardPasteTarget()
     private weak var pasteControl: UIPasteControl?
+    private var pasteboardObserver: NSObjectProtocol?
+    private var observedPasteboardChangeCount: Int?
+    private var hasUnconsumedClipboardChange = false
+    private lazy var emojiCatalog = EmojiCatalog.bundled()
+    private var emojiKeyboardView: EmojiKeyboardView?
     private var feedback: UIImpactFeedbackGenerator?
     private var settingsPanel: UIView?
     private var languageSwitches: [KeyboardLanguage: UISwitch] = [:]
@@ -571,12 +576,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     override func textDidChange(_ textInput: UITextInput?) {
         invalidatePendingInput(); cancelCursorIfDocumentChanged(); invalidateSpaceSnapshot(); invalidateCorrectionUndo()
-        pasteControl?.isHidden = textDocumentProxy.isSecureTextEntry == true
+        updatePasteControlVisibility()
         updateContext()
     }
     override func selectionDidChange(_ textInput: UITextInput?) { invalidatePendingInput(); cancelCursorIfDocumentChanged(); invalidateSpaceSnapshot(); dismissPopup(); invalidateCorrectionUndo(); updateContext() }
     private func reloadSettings() {
         settings = KeyboardSettings.loadKeyboard(fullAccess: hasFullAccess)
+        configurePasteboardMonitoring()
         configureFeedback()
         state.language = KeyboardSettings.lastUsedLanguage(enabled: settings.languages)
         state.emoji = false
@@ -588,6 +594,45 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         prewarmLexicon()
         rebuild()
+    }
+    private func configurePasteboardMonitoring() {
+        guard hasFullAccess else {
+            if let pasteboardObserver { NotificationCenter.default.removeObserver(pasteboardObserver) }
+            pasteboardObserver = nil
+            observedPasteboardChangeCount = nil
+            hasUnconsumedClipboardChange = false
+            updatePasteControlVisibility()
+            return
+        }
+        if pasteboardObserver == nil {
+            observedPasteboardChangeCount = UIPasteboard.general.changeCount
+            pasteboardObserver = NotificationCenter.default.addObserver(
+                forName: UIPasteboard.changedNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.refreshPasteboardChangeState()
+            }
+        } else {
+            // The keyboard extension can remain alive while another app copies
+            // text. Compare only the system's integer change counter; never read
+            // the clipboard contents until the user taps UIPasteControl.
+            refreshPasteboardChangeState()
+        }
+    }
+    private func refreshPasteboardChangeState() {
+        guard hasFullAccess else { updatePasteControlVisibility(); return }
+        let changeCount = UIPasteboard.general.changeCount
+        if let previous = observedPasteboardChangeCount, changeCount != previous {
+            hasUnconsumedClipboardChange = true
+        }
+        observedPasteboardChangeCount = changeCount
+        updatePasteControlVisibility()
+    }
+    private func updatePasteControlVisibility() {
+        // UIPasteControl itself is safe without Full Access. Keep the manual
+        // system-mediated paste path available in that mode; only the
+        // change-aware presentation needs clipboard change notifications.
+        let awaitingCopy = hasFullAccess && !hasUnconsumedClipboardChange
+        pasteControl?.isHidden = awaitingCopy || textDocumentProxy.isSecureTextEntry == true
     }
     private func clear(_ stack: UIStackView) {
         stack.arrangedSubviews.forEach { stack.removeArrangedSubview($0); $0.removeFromSuperview() }
@@ -601,23 +646,44 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         view.setNeedsLayout()
         suggestions.axis = .horizontal; suggestions.distribution = .fillEqually; suggestions.spacing = 6
         toolbar.axis = .horizontal; toolbar.spacing = 6
-        toolbar.addArrangedSubview(suggestions)
-        let pasteControl = UIPasteControl()
+        let pasteConfiguration = UIPasteControl.Configuration()
+        pasteConfiguration.displayMode = .iconOnly
+        pasteConfiguration.cornerStyle = .capsule
+        pasteConfiguration.baseBackgroundColor = theme.key.withAlphaComponent(0.44)
+        pasteConfiguration.baseForegroundColor = theme.foreground
+        let pasteControl = UIPasteControl(configuration: pasteConfiguration)
         pasteControl.target = pasteTarget
-        pasteControl.isHidden = textDocumentProxy.isSecureTextEntry == true
+        pasteControl.tintColor = theme.foreground
+        pasteControl.isHidden = true
         self.pasteControl = pasteControl
         pasteControl.accessibilityLabel = localized("Вставить из буфера обмена")
-        pasteControl.heightAnchor.constraint(greaterThanOrEqualToConstant: 32).isActive = true
-        pasteControl.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        pasteControl.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        pasteControl.widthAnchor.constraint(equalToConstant: 36).isActive = true
         pasteTarget.didRequestPaste = { [weak self] provider in self?.paste(provider) }
         toolbar.addArrangedSubview(pasteControl)
+        toolbar.addArrangedSubview(suggestions)
+        updatePasteControlVisibility()
         if needsToolbar { rows.addArrangedSubview(toolbar) }
         if lexiconEditing != nil { configureEditorBar() }
         for button in keyPlane.keyViews { button.removeFromSuperview() }
         keyPlane.keyViews.removeAll(keepingCapacity: true)
+        emojiKeyboardView = nil
+        if state.emoji {
+            let emojiView = EmojiKeyboardView(catalog: emojiCatalog, theme: theme,
+                                              interfaceLanguage: settings.interfaceLanguage,
+                                              needsInputModeSwitch: needsInputModeSwitchKey)
+            emojiView.onSelectEmoji = { [weak self] emoji in self?.insert(emoji) }
+            emojiView.onReturnToLetters = { [weak self] in self?.leaveEmojiKeyboard() }
+            emojiView.onDelete = { [weak self] in self?.deleteOnce() }
+            emojiView.inputModeSwitchButton?.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
+            emojiKeyboardView = emojiView
+            rows.addArrangedSubview(emojiView)
+            refreshSuggestions()
+            return
+        }
         keyPlane.language = state.language; keyPlane.symbolPage = state.symbols ? state.symbolPage : nil
-        keyPlane.customRows = state.emoji ? KeyboardLayout.emojiRows : nil
-        keyPlane.thirdRowUsesModeSwitch = state.emoji
+        keyPlane.customRows = nil
+        keyPlane.thirdRowUsesModeSwitch = false
         keyPlane.compact = settings.compactKeys; keyPlane.needsSystemKey = needsInputModeSwitchKey
         keyPlane.showsDebugZones = settings.debugTouchZones
         func attach(_ button: UIButton) {
@@ -627,7 +693,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             }
             keyPlane.keyViews.append(button); keyPlane.addKey(button)
         }
-        let keyRows = state.emoji ? KeyboardLayout.emojiRows : (state.symbols ? state.symbolPage.rows : state.language.rows)
+        let keyRows = state.symbols ? state.symbolPage.rows : state.language.rows
         for (index, keys) in keyRows.enumerated() {
             if index == 2 {
                 let title = state.emoji ? "ABC" : (state.symbols ? state.symbolPage.switchTitle : "⇧")
@@ -1609,6 +1675,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 self.completedWord = nil; self.lastSpace = nil; self.correctionUndo = nil
                 self.suppressedCorrection = nil; self.deletionUndo = nil
                 self.textDocumentProxy.insertText(text)
+                self.hasUnconsumedClipboardChange = false
+                self.updatePasteControlVisibility()
                 self.updateContext()
             }
         }
@@ -1885,5 +1953,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         for (index, label) in popupLabels.enumerated() { label.backgroundColor = index == popupIndex ? .systemIndigo.withAlphaComponent(0.25) : .clear }
     }
     private func dismissPopup() { popup?.removeFromSuperview(); popup = nil; popupLabels.removeAll(); popupValues.removeAll() }
-    deinit { previewHide?.cancel(); settingsHintTask?.cancel(); trailTimer?.invalidate() }
+    deinit {
+        if let pasteboardObserver { NotificationCenter.default.removeObserver(pasteboardObserver) }
+        previewHide?.cancel(); settingsHintTask?.cancel(); trailTimer?.invalidate()
+    }
 }

@@ -4,14 +4,15 @@ import XCTest
 @testable import KeyboardCore
 
 final class KeyboardGeometryTests: XCTestCase {
-    func testEmojiRowsUseABCModeSwitchAndRetainBackspace() {
+    func testCustomRowsUseModeSwitchAndRetainBackspace() {
+        let customRows = [["🙂", "😀"], ["🐶", "🐱"], ["👍", "❤️"]]
         let geometry = KeyboardGeometry.make(bounds: CGRect(x: 0, y: 0, width: 390, height: 260),
-                                             language: .english, customRows: KeyboardLayout.emojiRows,
+                                             language: .english, customRows: customRows,
                                              thirdRowUsesModeSwitch: true)
         let thirdRow = geometry.keys.filter { $0.row == 2 }
         XCTAssertEqual(thirdRow.first?.role, .modeSwitch)
         XCTAssertEqual(thirdRow.last?.role, .backspace)
-        XCTAssertEqual(thirdRow.compactMap { $0.role.character }.count, KeyboardLayout.emojiRows[2].count)
+        XCTAssertEqual(thirdRow.compactMap { $0.role.character }.count, customRows[2].count)
         XCTAssertTrue(thirdRow.compactMap { $0.role.character }.contains("❤️"))
     }
 

@@ -1,0 +1,19 @@
+{
+  "unicodeVersion": "18.0",
+  "emojiCount": 3972,
+  "fullyQualifiedCount": 3963,
+  "componentCount": 9,
+  "sha256": "4a7d191532dc8606b28ba1fa03d2031403f24920e273f5a671a4b70308f9cfe9",
+  "categories": {
+    "smileys": 172,
+    "people": 2430,
+    "components": 9,
+    "animals": 161,
+    "food": 132,
+    "travel": 221,
+    "activities": 85,
+    "objects": 268,
+    "symbols": 224,
+    "flags": 270
+  }
+}
