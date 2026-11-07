@@ -1,7 +1,7 @@
 import Foundation
 
-/// Numeric aggregates only: no key IDs, letters, timestamps, raw touch histories,
-/// surrounding text or document identifiers can be encoded by this type.
+/// Bounded online learner using sufficient statistics only: no key IDs, letters,
+/// timestamps, raw touch histories, surrounding text or document IDs are stored.
 public struct TouchOffsetStatistics: Codable, Equatable {
     public private(set) var count = 0
     public private(set) var meanX = 0.0
@@ -26,6 +26,20 @@ public struct TouchOffsetStatistics: Codable, Equatable {
     }
     public var offsetX: Double { trustedOffset(meanX, varianceSum: varianceSumX) }
     public var offsetY: Double { trustedOffset(meanY, varianceSum: varianceSumY) }
+    /// Learns how broadly this user tends to land within a key. The bounded
+    /// estimate changes only the touch likelihood curve, never key geometry.
+    public var learnedSigmaX: Double { trustedSigma(base: 0.34, varianceSum: varianceSumX) }
+    public var learnedSigmaY: Double { trustedSigma(base: 0.32, varianceSum: varianceSumY) }
+
+    private func trustedSigma(base: Double, varianceSum: Double) -> Double {
+        guard isValid, count >= 64 else { return base }
+        let variance = varianceSum / Double(max(1, count - 1))
+        let measuredSpread = sqrt(max(0, variance))
+        let target = min(0.46, max(0.24, 0.18 + measuredSpread * 0.75))
+        let confidence = min(1, Double(count - 64) / 128)
+        return base + (target - base) * confidence
+    }
+
     private func trustedOffset(_ mean: Double, varianceSum: Double) -> Double {
         guard isValid, count >= 32 else { return 0 }
         // Ramp in slowly; noisy/ambiguous observations have little influence.
@@ -51,6 +65,7 @@ public struct TouchAdaptationState: Codable, Equatable {
         if enabled && isValid {
             let stats = landscape ? self.landscape : portrait
             result.offsetX = stats.offsetX; result.offsetY = stats.offsetY
+            result.sigmaX = stats.learnedSigmaX; result.sigmaY = stats.learnedSigmaY
         }
         return result
     }

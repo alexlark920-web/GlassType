@@ -1,59 +1,93 @@
 import UIKit
 import KeyboardCore
 
+/// Emoji picker with an iOS-style search entry, horizontal catalogue browsing,
+/// category shortcuts, and the standard keyboard controls along the bottom.
 final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     var onSelectEmoji: ((String) -> Void)?
+    var onSearch: (() -> Void)?
     var onReturnToLetters: (() -> Void)?
     var onDelete: (() -> Void)?
+    var onDeletePressBegan: (() -> Void)?
     private(set) var inputModeSwitchButton: UIButton?
 
     private let catalog: EmojiCatalog
+    private let allItems: [EmojiItem]
     private let theme: KeyboardTheme
     private let gridLayout = UICollectionViewFlowLayout()
     private let grid: UICollectionView
+    private let searchButton = UIButton(type: .system)
     private let categoryScroll = UIScrollView()
     private let categoryStack = UIStackView()
     private let footer = UIStackView()
-    private var categoryButtons: [EmojiCategory: UIButton] = [:]
-    private var selectedSection = 0
-    private var lastWidth: CGFloat = 0
+    private var categoryButtons: [(section: Int?, button: UIButton)] = []
+    private var selectedSection: Int?
+    private var lastSize: CGSize = .zero
     private var backspaceHandler: EmojiBackspaceHandler?
+
+    private var visibleItems: [EmojiItem] {
+        guard let selectedSection, catalog.sections.indices.contains(selectedSection) else { return allItems }
+        return catalog.sections[selectedSection].entries
+    }
 
     init(catalog: EmojiCatalog, theme: KeyboardTheme, interfaceLanguage: InterfaceLanguage,
          needsInputModeSwitch: Bool) {
         self.catalog = catalog
+        allItems = catalog.sections.flatMap(\.entries)
         self.theme = theme
-        gridLayout.scrollDirection = .vertical
-        gridLayout.minimumLineSpacing = 2
+        gridLayout.scrollDirection = .horizontal
+        gridLayout.minimumLineSpacing = 3
         gridLayout.minimumInteritemSpacing = 2
         grid = UICollectionView(frame: .zero, collectionViewLayout: gridLayout)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
+        configureSearch(interfaceLanguage: interfaceLanguage)
         configureGrid()
         configureCategoryBar(interfaceLanguage: interfaceLanguage)
         configureFooter(interfaceLanguage: interfaceLanguage, needsInputModeSwitch: needsInputModeSwitch)
         configureLayout()
-        selectCategory(at: 0, scrollTab: false)
+        selectCategory(at: nil, scrollTab: false)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard abs(lastWidth - grid.bounds.width) > 1 else { return }
-        lastWidth = grid.bounds.width
+        guard abs(lastSize.width - grid.bounds.width) > 1 || abs(lastSize.height - grid.bounds.height) > 1 else { return }
+        lastSize = grid.bounds.size
         gridLayout.invalidateLayout()
+    }
+
+    private func configureSearch(interfaceLanguage: InterfaceLanguage) {
+        searchButton.translatesAutoresizingMaskIntoConstraints = false
+        searchButton.contentHorizontalAlignment = .leading
+        searchButton.contentEdgeInsets = UIEdgeInsets(top: 0, left: 11, bottom: 0, right: 10)
+        searchButton.setImage(UIImage(systemName: "magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular)), for: .normal)
+        searchButton.setTitle("  " + GlassTypeText.translate("Поиск эмодзи", to: interfaceLanguage), for: .normal)
+        searchButton.titleLabel?.font = .systemFont(ofSize: 14)
+        searchButton.tintColor = theme.foreground.withAlphaComponent(0.76)
+        searchButton.setTitleColor(theme.foreground.withAlphaComponent(0.76), for: .normal)
+        searchButton.backgroundColor = theme.key.withAlphaComponent(0.48)
+        searchButton.layer.cornerRadius = 13
+        searchButton.layer.cornerCurve = .continuous
+        searchButton.layer.borderWidth = 0.5
+        searchButton.layer.borderColor = UIColor.white.withAlphaComponent(0.12).cgColor
+        searchButton.accessibilityLabel = GlassTypeText.translate("Поиск эмодзи", to: interfaceLanguage)
+        searchButton.addAction(UIAction { [weak self] _ in self?.onSearch?() }, for: .touchUpInside)
     }
 
     private func configureGrid() {
         backgroundColor = .clear
+        grid.translatesAutoresizingMaskIntoConstraints = false
         grid.backgroundColor = .clear
         grid.dataSource = self
         grid.delegate = self
-        grid.alwaysBounceVertical = true
+        grid.alwaysBounceHorizontal = true
+        grid.showsHorizontalScrollIndicator = false
         grid.showsVerticalScrollIndicator = false
+        grid.isDirectionalLockEnabled = true
         grid.contentInsetAdjustmentBehavior = .never
-        grid.contentInset = UIEdgeInsets(top: 3, left: 3, bottom: 3, right: 3)
+        grid.contentInset = UIEdgeInsets(top: 3, left: 6, bottom: 3, right: 6)
         grid.register(EmojiItemCell.self, forCellWithReuseIdentifier: EmojiItemCell.reuseIdentifier)
     }
 
@@ -75,6 +109,14 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
             categoryStack.heightAnchor.constraint(equalTo: categoryScroll.frameLayoutGuide.heightAnchor)
         ])
 
+        let all = footerButton(image: "square.grid.3x3.fill")
+        all.accessibilityLabel = GlassTypeText.translate("Все эмодзи", to: interfaceLanguage)
+        all.accessibilityHint = GlassTypeText.translate("Показать эмодзи категории", to: interfaceLanguage)
+        all.addAction(UIAction { [weak self] _ in self?.selectCategory(at: nil, scrollTab: true) }, for: .touchUpInside)
+        all.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        categoryStack.addArrangedSubview(all)
+        categoryButtons.append((nil, all))
+
         for (index, section) in catalog.sections.enumerated() {
             let button = footerButton(image: section.category.symbolName)
             button.accessibilityLabel = GlassTypeText.translate(section.category.titleKey, to: interfaceLanguage)
@@ -83,7 +125,7 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
             button.addTarget(self, action: #selector(categoryTapped(_:)), for: .touchUpInside)
             button.widthAnchor.constraint(equalToConstant: 40).isActive = true
             categoryStack.addArrangedSubview(button)
-            categoryButtons[section.category] = button
+            categoryButtons.append((index, button))
         }
     }
 
@@ -120,11 +162,15 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
     }
 
     private func configureLayout() {
-        grid.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(searchButton)
         addSubview(grid)
         addSubview(footer)
         NSLayoutConstraint.activate([
-            grid.topAnchor.constraint(equalTo: topAnchor),
+            searchButton.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            searchButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            searchButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            searchButton.heightAnchor.constraint(equalToConstant: 36),
+            grid.topAnchor.constraint(equalTo: searchButton.bottomAnchor, constant: 2),
             grid.leadingAnchor.constraint(equalTo: leadingAnchor),
             grid.trailingAnchor.constraint(equalTo: trailingAnchor),
             grid.bottomAnchor.constraint(equalTo: footer.topAnchor),
@@ -158,16 +204,16 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
         selectCategory(at: sender.tag, scrollTab: true)
     }
 
-    private func selectCategory(at index: Int, scrollTab: Bool) {
-        guard catalog.sections.indices.contains(index) else { return }
+    private func selectCategory(at index: Int?, scrollTab: Bool) {
+        if let index, !catalog.sections.indices.contains(index) { return }
         selectedSection = index
-        for (category, button) in categoryButtons {
-            let selected = category == catalog.sections[index].category
-            button.backgroundColor = theme.key.withAlphaComponent(selected ? 0.95 : 0.42)
-            button.layer.borderColor = UIColor.white.withAlphaComponent(selected ? 0.25 : 0.08).cgColor
-            button.accessibilityTraits = selected ? [.button, .selected] : .button
+        for item in categoryButtons {
+            let selected = item.section == index
+            item.button.backgroundColor = theme.key.withAlphaComponent(selected ? 0.95 : 0.42)
+            item.button.layer.borderColor = UIColor.white.withAlphaComponent(selected ? 0.25 : 0.08).cgColor
+            item.button.accessibilityTraits = selected ? [.button, .selected] : .button
             if selected && scrollTab {
-                let rect = button.convert(button.bounds, to: categoryScroll).insetBy(dx: -4, dy: 0)
+                let rect = item.button.convert(item.button.bounds, to: categoryScroll).insetBy(dx: -4, dy: 0)
                 categoryScroll.scrollRectToVisible(rect, animated: true)
             }
         }
@@ -176,33 +222,31 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
     }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        catalog.sections.indices.contains(selectedSection) ? catalog.sections[selectedSection].entries.count : 0
+        visibleItems.count
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: EmojiItemCell.reuseIdentifier, for: indexPath) as! EmojiItemCell
-        let item = catalog.sections[selectedSection].entries[indexPath.item]
+        let item = visibleItems[indexPath.item]
         cell.configure(item, color: theme.foreground)
         return cell
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard catalog.sections.indices.contains(selectedSection),
-              catalog.sections[selectedSection].entries.indices.contains(indexPath.item) else { return }
-        onSelectEmoji?(catalog.sections[selectedSection].entries[indexPath.item].emoji)
+        guard visibleItems.indices.contains(indexPath.item) else { return }
+        onSelectEmoji?(visibleItems[indexPath.item].emoji)
     }
 
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let availableWidth = max(1, collectionView.bounds.width - collectionView.contentInset.left - collectionView.contentInset.right)
-        let columns = max(5, min(18, Int(availableWidth / 42)))
-        let spacing = CGFloat(columns - 1) * gridLayout.minimumInteritemSpacing
-        let width = floor((availableWidth - spacing) / CGFloat(columns))
-        return CGSize(width: width, height: 42)
+        CGSize(width: 42, height: 42)
     }
 
     private func installBackspaceRepeat(on button: UIButton, deleteLabel: String) {
-        backspaceHandler = EmojiBackspaceHandler(button: button, deleteLabel: deleteLabel) { [weak self] in self?.onDelete?() }
+        backspaceHandler = EmojiBackspaceHandler(button: button, deleteLabel: deleteLabel,
+                                                 onBegin: { [weak self] in
+            self?.onDeletePressBegan?()
+        }, onRepeat: { [weak self] in self?.onDelete?() })
     }
 }
 
@@ -247,40 +291,49 @@ private final class EmojiItemCell: UICollectionViewCell {
 }
 
 private final class EmojiBackspaceHandler: NSObject {
-    private let onDelete: () -> Void
+    private weak var button: UIButton?
+    private let idleColor: UIColor?
+    private let onBegin: () -> Void
+    private let onRepeat: () -> Void
     private var timer: Timer?
-    private var repeated = false
     private var active = false
     private var heldSince: TimeInterval = 0
 
-    init(button: UIButton, deleteLabel: String, onDelete: @escaping () -> Void) {
-        self.onDelete = onDelete
+    init(button: UIButton, deleteLabel: String, onBegin: @escaping () -> Void, onRepeat: @escaping () -> Void) {
+        self.button = button
+        idleColor = button.backgroundColor
+        self.onBegin = onBegin
+        self.onRepeat = onRepeat
         super.init()
         button.addTarget(self, action: #selector(begin), for: .touchDown)
         button.addTarget(self, action: #selector(end), for: [.touchUpInside, .touchUpOutside, .touchCancel])
-        button.accessibilityCustomActions = [UIAccessibilityCustomAction(name: deleteLabel) { [weak self] _ in self?.onDelete(); return true }]
+        button.accessibilityCustomActions = [UIAccessibilityCustomAction(name: deleteLabel) { [weak self] _ in self?.onBegin(); return true }]
     }
 
     @objc private func begin() {
         stop()
         active = true
-        repeated = false
         heldSince = ProcessInfo.processInfo.systemUptime
+        button?.isHighlighted = true
+        UIView.animate(withDuration: 0.06, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.button?.backgroundColor = self.button?.backgroundColor?.withAlphaComponent(0.9)
+        }
+        onBegin()
         schedule(BackspaceRepeat.initialDelay)
     }
 
     @objc private func end() {
-        guard active else { return }
-        let wasRepeated = repeated
         stop()
-        if !wasRepeated { onDelete() }
+        button?.isHighlighted = false
+        UIView.animate(withDuration: 0.1, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.button?.backgroundColor = self.idleColor
+        }
     }
 
     private func schedule(_ interval: TimeInterval) {
         let next = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             guard let self, self.active else { return }
-            self.repeated = true
-            self.onDelete()
+            self.onRepeat()
             self.schedule(BackspaceRepeat.interval(heldFor: ProcessInfo.processInfo.systemUptime - self.heldSince))
         }
         timer = next

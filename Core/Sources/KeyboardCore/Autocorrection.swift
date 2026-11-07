@@ -160,7 +160,7 @@ public struct AutocorrectionPipeline {
 
     public func needsDictionaryChecks(for word: String, language: KeyboardLanguage,
                                       personalLexicon: PersonalLexicon) -> Bool {
-        guard !personalLexicon.excludes(word), personalLexicon.replacement(for: word) == nil,
+        guard !personalLexicon.excludes(word), !personalLexicon.containsKnownWord(word), personalLexicon.replacement(for: word) == nil,
               engine.replacement(for: word, language: language) == nil else { return false }
         return true
     }
@@ -170,7 +170,7 @@ public struct AutocorrectionPipeline {
                             offlineCheck: OfflineLexicon.SpellingCheck?,
                             systemWordIsKnown: Bool = false,
                             systemCandidates: [String] = []) -> String? {
-        guard !personalLexicon.excludes(word) else { return nil }
+        guard !personalLexicon.excludes(word), !personalLexicon.containsKnownWord(word) else { return nil }
         if let personal = personalLexicon.replacement(for: word) { return personal }
         if let explicit = engine.replacement(for: word, language: language) { return explicit }
         guard let offlineCheck, !offlineCheck.known else { return nil }

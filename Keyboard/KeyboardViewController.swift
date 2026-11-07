@@ -356,16 +356,20 @@ private final class SpacebarButton: KeyButton {
 
 private final class DeleteKeyButton: KeyButton {
     var deleteAction: (() -> Void)?
+    var pressBeganAction: (() -> Void)?
+    var pressEndedWithoutSwipeAction: (() -> Void)?
     var repeatDeleteAction: (() -> Void)?
     var deleteWordAction: (() -> Void)?
     var canSwipeWord: (() -> Bool)?
     private var delay: Timer?
     private var start: CGPoint = .zero
-    private var swiped = false, repeated = false, deleteGestureActive = false
+    private var swiped = false, repeated = false, deleteGestureActive = false, swipeEligible = false
     override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         cancelInteraction(); _ = super.beginTracking(touch, with: event)
         deleteGestureActive = true; start = touch.location(in: self); isHighlighted = true
+        swipeEligible = canSwipeWord?() == true
         heldSince = ProcessInfo.processInfo.systemUptime
+        pressBeganAction?()
         scheduleRepeat(after: BackspaceRepeat.initialDelay)
         return true
     }
@@ -383,7 +387,7 @@ private final class DeleteKeyButton: KeyButton {
     override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         guard deleteGestureActive else { return false }
         let p = touch.location(in: self)
-        if !repeated, canSwipeWord?() == true, p.x - start.x < -32, abs(p.y - start.y) < abs(p.x - start.x) * 0.6 {
+        if !repeated, swipeEligible, p.x - start.x < -32, abs(p.y - start.y) < abs(p.x - start.x) * 0.6 {
             swiped = true; delay?.invalidate(); delay = nil
         }
         if !point(inside: p, with: event), !swiped {
@@ -399,15 +403,14 @@ private final class DeleteKeyButton: KeyButton {
     override func endTracking(_ touch: UITouch?, with event: UIEvent?) {
         guard deleteGestureActive else { super.endTracking(touch, with: event); return }
         let p = touch?.location(in: self) ?? start
-        let eligible = !repeated && canSwipeWord?() == true
+        let eligible = !repeated && swipeEligible
         let word = (swiped || eligible) && p.x - start.x < -32 && abs(p.y - start.y) < abs(p.x - start.x) * 0.6
-        let tap = !swiped && !repeated && touch != nil && point(inside: p, with: event)
         cancelInteraction(); super.endTracking(touch, with: event)
-        if word { deleteWordAction?() } else if tap { deleteAction?() }
+        if word { deleteWordAction?() } else { pressEndedWithoutSwipeAction?() }
     }
-    override func cancelTracking(with event: UIEvent?) { cancelInteraction(); super.cancelTracking(with: event) }
+    override func cancelTracking(with event: UIEvent?) { cancelInteraction(); pressEndedWithoutSwipeAction?(); super.cancelTracking(with: event) }
     override func didMoveToWindow() { super.didMoveToWindow(); if window == nil { cancelInteraction() } }
-    func cancelInteraction() { deleteGestureActive = false; delay?.invalidate(); delay = nil; swiped = false; repeated = false; isHighlighted = false }
+    func cancelInteraction() { deleteGestureActive = false; delay?.invalidate(); delay = nil; swiped = false; repeated = false; swipeEligible = false; isHighlighted = false }
     override func accessibilityActivate() -> Bool { deleteAction?(); return true }
     deinit { delay?.invalidate() }
 }
@@ -436,13 +439,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var trailTimer: Timer?
     private let suggestions = UIStackView()
     private let toolbar = UIStackView()
-    private let pasteTarget = KeyboardPasteTarget()
-    private weak var pasteControl: UIPasteControl?
-    private var pasteboardObserver: NSObjectProtocol?
-    private var observedPasteboardChangeCount: Int?
-    private var hasUnconsumedClipboardChange = false
     private lazy var emojiCatalog = EmojiCatalog.bundled()
+    private lazy var emojiItems = emojiCatalog.sections.flatMap(\.entries)
     private var emojiKeyboardView: EmojiKeyboardView?
+    private var emojiSearchActive = false
+    private var emojiSearchQuery = ""
+    private weak var emojiSearchLabel: UILabel?
     private var feedback: UIImpactFeedbackGenerator?
     private var settingsPanel: UIView?
     private var languageSwitches: [KeyboardLanguage: UISwitch] = [:]
@@ -472,6 +474,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var lastHeight: CGFloat = 0
     private var lastLandscape = false
     private var pendingPrefix: String?
+    private var deleteSwipeRestoreSuffix = ""
     private var suggestionWords: [String] = []
     private var suggestionSignature: String?
     private let textService = KeyboardTextService()
@@ -576,13 +579,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     override func textDidChange(_ textInput: UITextInput?) {
         invalidatePendingInput(); cancelCursorIfDocumentChanged(); invalidateSpaceSnapshot(); invalidateCorrectionUndo()
-        updatePasteControlVisibility()
         updateContext()
     }
     override func selectionDidChange(_ textInput: UITextInput?) { invalidatePendingInput(); cancelCursorIfDocumentChanged(); invalidateSpaceSnapshot(); dismissPopup(); invalidateCorrectionUndo(); updateContext() }
     private func reloadSettings() {
         settings = KeyboardSettings.loadKeyboard(fullAccess: hasFullAccess)
-        configurePasteboardMonitoring()
         configureFeedback()
         state.language = KeyboardSettings.lastUsedLanguage(enabled: settings.languages)
         state.emoji = false
@@ -595,45 +596,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         prewarmLexicon()
         rebuild()
     }
-    private func configurePasteboardMonitoring() {
-        guard hasFullAccess else {
-            if let pasteboardObserver { NotificationCenter.default.removeObserver(pasteboardObserver) }
-            pasteboardObserver = nil
-            observedPasteboardChangeCount = nil
-            hasUnconsumedClipboardChange = false
-            updatePasteControlVisibility()
-            return
-        }
-        if pasteboardObserver == nil {
-            observedPasteboardChangeCount = UIPasteboard.general.changeCount
-            pasteboardObserver = NotificationCenter.default.addObserver(
-                forName: UIPasteboard.changedNotification, object: nil, queue: .main
-            ) { [weak self] _ in
-                self?.refreshPasteboardChangeState()
-            }
-        } else {
-            // The keyboard extension can remain alive while another app copies
-            // text. Compare only the system's integer change counter; never read
-            // the clipboard contents until the user taps UIPasteControl.
-            refreshPasteboardChangeState()
-        }
-    }
-    private func refreshPasteboardChangeState() {
-        guard hasFullAccess else { updatePasteControlVisibility(); return }
-        let changeCount = UIPasteboard.general.changeCount
-        if let previous = observedPasteboardChangeCount, changeCount != previous {
-            hasUnconsumedClipboardChange = true
-        }
-        observedPasteboardChangeCount = changeCount
-        updatePasteControlVisibility()
-    }
-    private func updatePasteControlVisibility() {
-        // UIPasteControl itself is safe without Full Access. Keep the manual
-        // system-mediated paste path available in that mode; only the
-        // change-aware presentation needs clipboard change notifications.
-        let awaitingCopy = hasFullAccess && !hasUnconsumedClipboardChange
-        pasteControl?.isHidden = awaitingCopy || textDocumentProxy.isSecureTextEntry == true
-    }
     private func clear(_ stack: UIStackView) {
         stack.arrangedSubviews.forEach { stack.removeArrangedSubview($0); $0.removeFromSuperview() }
     }
@@ -641,28 +603,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if preservingInput { resetGlidePresentation() } else { cancelGlide() }
         lastSpace = nil; glideWords = []; glideUndo = nil; deletionUndo = nil
         hideKeyPreview(); spaceButton?.cancelInteraction(); spaceButton = nil; symbolsButton = nil
-        stopDeleting(); dismissPopup(); hideLocalSettings(); clear(rows); clear(toolbar); clear(suggestions); letterButtons.removeAll(); shiftButton = nil; renderedShift = nil; renderedLetterCase = nil
+        stopDeleting(); dismissPopup(); hideLocalSettings(); clear(rows); clear(toolbar); clear(suggestions); letterButtons.removeAll(); shiftButton = nil; renderedShift = nil; renderedLetterCase = nil; emojiSearchLabel = nil
         suggestionSignature = nil; suggestionWords.removeAll(); correctionUndo = nil
         view.setNeedsLayout()
         suggestions.axis = .horizontal; suggestions.distribution = .fillEqually; suggestions.spacing = 6
         toolbar.axis = .horizontal; toolbar.spacing = 6
-        let pasteConfiguration = UIPasteControl.Configuration()
-        pasteConfiguration.displayMode = .iconOnly
-        pasteConfiguration.cornerStyle = .capsule
-        pasteConfiguration.baseBackgroundColor = theme.key.withAlphaComponent(0.44)
-        pasteConfiguration.baseForegroundColor = theme.foreground
-        let pasteControl = UIPasteControl(configuration: pasteConfiguration)
-        pasteControl.target = pasteTarget
-        pasteControl.tintColor = theme.foreground
-        pasteControl.isHidden = true
-        self.pasteControl = pasteControl
-        pasteControl.accessibilityLabel = localized("Вставить из буфера обмена")
-        pasteControl.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        pasteControl.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        pasteTarget.didRequestPaste = { [weak self] provider in self?.paste(provider) }
-        toolbar.addArrangedSubview(pasteControl)
-        toolbar.addArrangedSubview(suggestions)
-        updatePasteControlVisibility()
+        if emojiSearchActive { configureEmojiSearchToolbar() }
+        else { toolbar.addArrangedSubview(suggestions) }
         if needsToolbar { rows.addArrangedSubview(toolbar) }
         if lexiconEditing != nil { configureEditorBar() }
         for button in keyPlane.keyViews { button.removeFromSuperview() }
@@ -673,8 +620,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                                               interfaceLanguage: settings.interfaceLanguage,
                                               needsInputModeSwitch: needsInputModeSwitchKey)
             emojiView.onSelectEmoji = { [weak self] emoji in self?.insert(emoji) }
+            emojiView.onSearch = { [weak self] in self?.beginEmojiSearch() }
             emojiView.onReturnToLetters = { [weak self] in self?.leaveEmojiKeyboard() }
-            emojiView.onDelete = { [weak self] in self?.deleteOnce() }
+            emojiView.onDeletePressBegan = { [weak self] in self?.performFeedback(); self?.deleteOnce() }
+            emojiView.onDelete = { [weak self] in self?.deleteOnce(allowGlideWord: false) }
             emojiView.inputModeSwitchButton?.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
             emojiKeyboardView = emojiView
             rows.addArrangedSubview(emojiView)
@@ -715,9 +664,15 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 let delete = makeButton("⌫", special: true); delete.accessibilityLabel = localized("Удалить")
                 deleteButton = delete as? DeleteKeyButton
                 deleteButton?.deleteAction = { [weak self] in self?.deleteOnce() }
+                deleteButton?.pressBeganAction = { [weak self] in self?.beginBackspacePress() }
+                deleteButton?.pressEndedWithoutSwipeAction = { [weak self] in self?.deleteSwipeRestoreSuffix = "" }
                 deleteButton?.repeatDeleteAction = { [weak self] in self?.deleteOnce(allowGlideWord: false) }
                 deleteButton?.deleteWordAction = { [weak self] in self?.deleteWord() }
-                deleteButton?.canSwipeWord = { [weak self] in self?.settings.swipeDeleteWord == true && self?.lexiconEditing == nil }
+                deleteButton?.canSwipeWord = { [weak self] in
+                    guard let self else { return false }
+                    return self.settings.swipeDeleteWord && self.lexiconEditing == nil && !self.cursorMode &&
+                        self.completedWord == nil && self.correctionUndo == nil && !self.emojiSearchActive
+                }
                 delete.accessibilityCustomActions = [UIAccessibilityCustomAction(name: localized("Удалить слово")) { [weak self] _ in self?.deleteWord(); return true }]
                 attach(delete)
             }
@@ -802,6 +757,117 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         keyPlane.invalidateGeometry(); applyTouchConfiguration()
         refreshLabels(); refreshSuggestions()
     }
+
+    private func configureEmojiSearchToolbar() {
+        toolbar.distribution = .fill
+        let capsule = UIView()
+        capsule.translatesAutoresizingMaskIntoConstraints = false
+        capsule.backgroundColor = theme.key.withAlphaComponent(0.54)
+        capsule.layer.cornerRadius = 12
+        capsule.layer.cornerCurve = .continuous
+        capsule.layer.borderWidth = 0.5
+        capsule.layer.borderColor = UIColor.white.withAlphaComponent(0.14).cgColor
+
+        let icon = UIImageView(image: UIImage(systemName: "magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .regular)))
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.tintColor = theme.foreground.withAlphaComponent(0.7)
+        icon.isAccessibilityElement = false
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .systemFont(ofSize: 13)
+        label.textColor = theme.foreground
+        label.lineBreakMode = .byTruncatingTail
+        label.text = emojiSearchQuery.isEmpty ? localized("Поиск эмодзи") : emojiSearchQuery
+        emojiSearchLabel = label
+        let close = UIButton(type: .system)
+        close.translatesAutoresizingMaskIntoConstraints = false
+        close.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)), for: .normal)
+        close.tintColor = theme.foreground.withAlphaComponent(0.72)
+        close.accessibilityLabel = localized("Закрыть поиск эмодзи")
+        close.addAction(UIAction { [weak self] _ in self?.endEmojiSearch(returnToEmoji: true) }, for: .touchUpInside)
+        capsule.addSubview(icon); capsule.addSubview(label); capsule.addSubview(close)
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: capsule.leadingAnchor, constant: 9),
+            icon.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 5),
+            label.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
+            label.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -3),
+            close.trailingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: -6),
+            close.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
+            close.widthAnchor.constraint(equalToConstant: 22),
+            capsule.heightAnchor.constraint(equalToConstant: 34)
+        ])
+        label.accessibilityLabel = localized("Поиск эмодзи")
+        label.accessibilityValue = emojiSearchQuery
+        capsule.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        capsule.widthAnchor.constraint(equalToConstant: min(max(view.bounds.width * 0.38, 118), 158)).isActive = true
+        toolbar.addArrangedSubview(capsule)
+        suggestions.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        suggestions.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        toolbar.addArrangedSubview(suggestions)
+        refreshEmojiSearchResults()
+    }
+
+    private func beginEmojiSearch() {
+        guard !emojiSearchActive else { return }
+        emojiSearchActive = true
+        emojiSearchQuery = ""
+        state.emoji = false
+        state.symbols = false
+        rebuild()
+    }
+
+    private func endEmojiSearch(returnToEmoji: Bool) {
+        guard emojiSearchActive else { return }
+        emojiSearchActive = false
+        emojiSearchQuery = ""
+        state.emoji = returnToEmoji
+        if returnToEmoji { state.symbols = false }
+        rebuild()
+    }
+
+    private func refreshEmojiSearchResults() {
+        guard emojiSearchActive else { return }
+        emojiSearchLabel?.text = emojiSearchQuery.isEmpty ? localized("Поиск эмодзи") : emojiSearchQuery
+        suggestionSignature = "emoji-search:" + emojiSearchQuery
+        clear(suggestions)
+        guard !emojiSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let hint = UILabel()
+            hint.text = localized("Введите запрос")
+            hint.font = .systemFont(ofSize: 12)
+            hint.textColor = theme.foreground.withAlphaComponent(0.62)
+            hint.textAlignment = .center
+            suggestions.addArrangedSubview(hint)
+            return
+        }
+        let items = EmojiSearch.search(emojiSearchQuery, in: emojiItems, limit: 7)
+        for item in items {
+            let button = makeSuggestionButton(item.emoji)
+            button.titleLabel?.font = .systemFont(ofSize: 23)
+            button.accessibilityLabel = item.name
+            button.addAction(UIAction { [weak self] _ in self?.selectEmojiSearchResult(item.emoji) }, for: .touchUpInside)
+            suggestions.addArrangedSubview(button)
+        }
+        if items.isEmpty {
+            let hint = UILabel()
+            hint.text = localized("Нет совпадений")
+            hint.font = .systemFont(ofSize: 12)
+            hint.textColor = theme.foreground.withAlphaComponent(0.62)
+            hint.textAlignment = .center
+            suggestions.addArrangedSubview(hint)
+        }
+    }
+
+    private func selectEmojiSearchResult(_ emoji: String) {
+        guard emojiSearchActive else { return }
+        emojiSearchActive = false
+        emojiSearchQuery = ""
+        state.emoji = true
+        state.symbols = false
+        insert(emoji)
+        rebuild()
+    }
     private func makeButton(_ title: String, special: Bool = false) -> UIButton {
         let button: KeyButton
         if title == "⌫" { button = DeleteKeyButton(frame: .zero) }
@@ -810,6 +876,19 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         configureButton(button, title: title)
         button.showsCharacterPreview = !special && title.count == 1
         button.pressBehavior = !special && title.count == 1 ? .character : .function
+        return button
+    }
+    private func makeSuggestionButton(_ title: String = "") -> UIButton {
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setTitle(title, for: .normal)
+        button.setTitleColor(theme.foreground, for: .normal)
+        button.tintColor = theme.foreground
+        button.titleLabel?.font = .systemFont(ofSize: 15)
+        button.titleLabel?.lineBreakMode = .byTruncatingTail
+        button.backgroundColor = .clear
+        button.layer.borderWidth = 0
+        button.contentEdgeInsets = UIEdgeInsets(top: 0, left: 3, bottom: 0, right: 3)
         return button
     }
     private func configureTextAction(_ button: UIButton, text: String) {
@@ -1107,19 +1186,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }, for: .valueChanged)
         segmented("Язык интерфейса", control: localeControl, group: locale)
 
-        let languages = card("Языки ввода · минимум один")
-        for language in KeyboardLanguage.allCases {
-            languageSwitches[language] = toggle(language.title, value: settings.languages.contains(language), group: languages) { [weak self] enabled in
-                guard let self else { return }
-                self.settings.languages = EnabledKeyboardLanguages.setting(language, enabled: enabled, in: self.settings.languages)
-                self.settings.saveKeyboardOverrides()
-                if !self.settings.languages.contains(self.state.language), let first = self.settings.languages.first {
-                    self.state.language = first; KeyboardSettings.rememberLanguage(first); self.prewarmLexicon()
-                }
-                self.updateLanguageSwitches()
-            }
-        }
-        updateLanguageSwitches()
         let typing = card("Ввод")
         toggle("Автозамена", value: settings.autoCorrection, group: typing) { [weak self] value in
             self?.settings.autoCorrection = value; self?.settings.saveKeyboardOverrides()
@@ -1183,7 +1249,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         let calibrationNote = UILabel(); calibrationNote.numberOfLines = 0
         calibrationNote.font = .preferredFont(forTextStyle: .footnote); calibrationNote.textColor = .secondaryLabel
-        calibrationNote.text = localized("Только обезличенные средние смещения и разброс. Буквы, сообщения, пароли и история координат не сохраняются. Сброс — отдельно для всех ориентаций.")
+        calibrationNote.text = localized("Локальное обучение меняет центр и ширину зоны касания по обезличенным агрегатам. Буквы, сообщения, пароли и история координат не сохраняются. Сброс охватывает все ориентации.")
         content.addArrangedSubview(calibrationNote)
         let clearCalibration = UIButton(type: .system); clearCalibration.setTitle(localized("Сбросить адаптацию касаний"), for: .normal)
         clearCalibration.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
@@ -1223,6 +1289,20 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         preservation.numberOfLines = 0; preservation.textColor = .secondaryLabel
         preservation.font = .preferredFont(forTextStyle: .footnote); preservation.adjustsFontForContentSizeCategory = true
         content.addArrangedSubview(preservation)
+
+        let languages = card("Языки ввода · минимум один")
+        for language in KeyboardLanguage.allCases {
+            languageSwitches[language] = toggle(language.title, value: settings.languages.contains(language), group: languages) { [weak self] enabled in
+                guard let self else { return }
+                self.settings.languages = EnabledKeyboardLanguages.setting(language, enabled: enabled, in: self.settings.languages)
+                self.settings.saveKeyboardOverrides()
+                if !self.settings.languages.contains(self.state.language), let first = self.settings.languages.first {
+                    self.state.language = first; KeyboardSettings.rememberLanguage(first); self.prewarmLexicon()
+                }
+                self.updateLanguageSwitches()
+            }
+        }
+        updateLanguageSwitches()
 
         rows.isHidden = true; settingsPanel = panel
         UIAccessibility.post(notification: .screenChanged, argument: done)
@@ -1302,7 +1382,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         if !cursorMode { updateContext() }
     }
-    private var needsToolbar: Bool { true } // Keep explicit paste available even when suggestions are disabled.
+    private var needsToolbar: Bool { true } // Keep suggestions and the in-keyboard emoji-search input available.
     private func scheduleSettingsHint(for button: KeyButton) {
         hideKeyPreview()
         let task = DispatchWorkItem { [weak self, weak button] in
@@ -1318,6 +1398,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private func deleteWord() {
         if pendingInput.deferIfBusy(.deleteWord) { return }
+        let restoreSuffix = deleteSwipeRestoreSuffix
+        deleteSwipeRestoreSuffix = ""
         guard settings.swipeDeleteWord, lexiconEditing == nil, !cursorMode else { return }
         completedWord = nil
         lastSpace = nil; correctionUndo = nil; glideWords = []; glideUndo = nil
@@ -1350,8 +1432,19 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if !reachedBoundary && deleted.count >= 128 {
             textDocumentProxy.insertText(deleted); updateContext(); return
         }
-        deletionUndo = TextDeletionUndo(deletedText: deleted, before: remaining, after: after, document: document)
+        deletionUndo = TextDeletionUndo(deletedText: deleted + restoreSuffix, before: remaining, after: after, document: document)
         performFeedback(); suggestionSignature = nil; updateContext()
+    }
+
+    private func saveCurrentWordToPersonalDictionary(_ word: String) {
+        guard textDocumentProxy.isSecureTextEntry != true,
+              (3...64).contains(word.count), word.allSatisfy(\.isLetter),
+              let dictionaryCheck = OfflineLexicon.preparedCheck(word, language: state.language),
+              !dictionaryCheck.known else { return }
+        settings.personalLexicon.addKnownWord(word)
+        settings.saveKeyboardOverrides()
+        suggestionSignature = nil
+        refreshSuggestions()
     }
     private func restoreDeletedWord() {
         guard let undo = deletionUndo,
@@ -1428,6 +1521,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         stack.addArrangedSubview(note)
         for (source, target) in settings.personalLexicon.replacements.sorted(by: { $0.key < $1.key }) {
             action("\(source) → \(target)   ×") { [weak self] in self?.settings.personalLexicon.replacements.removeValue(forKey: source); self?.settings.saveKeyboardOverrides(); self?.showLexiconPanel() }
+        }
+        for word in settings.personalLexicon.knownWords {
+            action(localized("Пользовательское слово: ") + word + "   ×") { [weak self] in
+                guard let self else { return }
+                self.settings.personalLexicon.knownWords.removeAll { $0.caseInsensitiveCompare(word) == .orderedSame }
+                self.settings.saveKeyboardOverrides(); self.showLexiconPanel()
+            }
         }
         for word in settings.personalLexicon.excludedWords.sorted() {
             action(localized("Не исправлять: ") + "\(word)   ×") { [weak self] in self?.settings.personalLexicon.excludedWords.removeAll { $0 == word }; self?.settings.saveKeyboardOverrides(); self?.showLexiconPanel() }
@@ -1630,6 +1730,17 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private func insert(_ text: String) {
         if pendingInput.deferIfBusy(.text(text)) { return }
+        if emojiSearchActive {
+            if text == "\n" {
+                if let first = EmojiSearch.search(emojiSearchQuery, in: emojiItems, limit: 1).first {
+                    selectEmojiSearchResult(first.emoji)
+                }
+                return
+            }
+            emojiSearchQuery.append(text)
+            refreshEmojiSearchResults()
+            return
+        }
         if lexiconEditing != nil { editLexicon(text); return }
         synchronizeCapitalization()
         let trim = completedWord?.spaceDeletionCount(before: text, in: inputContext) ?? 0
@@ -1659,27 +1770,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         textDocumentProxy.insertText(state.inserted(text))
         if text == " " { rememberSpace() }
         updateContext()
-    }
-    private func paste(_ provider: NSItemProvider) {
-        guard textDocumentProxy.isSecureTextEntry != true,
-              provider.canLoadObject(ofClass: NSString.self) else { return }
-        let context = inputContext
-        provider.loadObject(ofClass: NSString.self) { [weak self] object, _ in
-            guard let text = object as? String, !text.isEmpty, text.utf8.count <= 65_536 else { return }
-            DispatchQueue.main.async {
-                guard let self, self.textDocumentProxy.isSecureTextEntry != true,
-                      context.matches(self.inputContext) else { return }
-                // This is a user-initiated paste. The clipboard value remains
-                // transient and is never added to settings or an input log.
-                self.pendingInput.cancel(); self.cancelGlide()
-                self.completedWord = nil; self.lastSpace = nil; self.correctionUndo = nil
-                self.suppressedCorrection = nil; self.deletionUndo = nil
-                self.textDocumentProxy.insertText(text)
-                self.hasUnconsumedClipboardChange = false
-                self.updatePasteControlVisibility()
-                self.updateContext()
-            }
-        }
     }
     private var textAllowsAutomation: Bool {
         let kind: KeyboardInputFieldKind
@@ -1754,6 +1844,14 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private func toggleEmojiKeyboard() {
         if pendingInput.deferIfBusy(.emoji) { return }
+        if emojiSearchActive {
+            emojiSearchActive = false
+            emojiSearchQuery = ""
+            state.emoji = true
+            state.symbols = false
+            rebuild(preservingInput: drainingInput)
+            return
+        }
         state.emoji.toggle()
         if state.emoji { state.symbols = false }
         rebuild(preservingInput: drainingInput)
@@ -1798,7 +1896,25 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         shiftButton?.accessibilityValue = state.emoji ? localized("Эмодзи") : (state.symbols ? (state.symbolPage == .numbers ? "123" : "#*=") : (state.shift == .locked ? "Caps Lock" : (state.shift == .once ? localized("Включён") : localized("Выключен"))))
     }
     private func stopDeleting() { deleteButton?.cancelInteraction() }
+    private func beginBackspacePress() {
+        let before = textDocumentProxy.documentContextBeforeInput
+        deleteSwipeRestoreSuffix = ""
+        performFeedback()
+        deleteOnce()
+        if let before, let after = textDocumentProxy.documentContextBeforeInput {
+            let beforeCharacters = Array(before), afterCharacters = Array(after)
+            if afterCharacters.count < beforeCharacters.count,
+               Array(beforeCharacters.prefix(afterCharacters.count)) == afterCharacters {
+                deleteSwipeRestoreSuffix = String(beforeCharacters.dropFirst(afterCharacters.count))
+            }
+        }
+    }
     private func deleteOnce(allowGlideWord: Bool = true) {
+        if emojiSearchActive {
+            if !emojiSearchQuery.isEmpty { emojiSearchQuery.removeLast() }
+            refreshEmojiSearchResults()
+            return
+        }
         if pendingInput.deferIfBusy(.backspace(allowGlideWord)) { return }
         let word = completedWord
         let atomicCount = allowGlideWord ? word?.deletionCount(in: inputContext) : nil
@@ -1842,6 +1958,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private func refreshSuggestions() {
         guard lexiconEditing == nil else { return }
+        if emojiSearchActive {
+            refreshEmojiSearchResults()
+            return
+        }
         if state.emoji {
             if suggestionSignature != "emoji-layout" { clear(suggestions); suggestionSignature = "emoji-layout" }
             return
@@ -1849,7 +1969,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if let undo = deletionUndo, undo.matches(before: textDocumentProxy.documentContextBeforeInput, after: textDocumentProxy.documentContextAfterInput, document: String(describing: textDocumentProxy.documentIdentifier), hasSelection: !(textDocumentProxy.selectedText ?? "").isEmpty) {
             if suggestionSignature != "undo-delete" {
                 clear(suggestions); suggestionSignature = "undo-delete"
-                let button = makeButton(localized("Вернуть слово"), special: true); button.titleLabel?.font = .systemFont(ofSize: 14)
+                let button = makeSuggestionButton(localized("Вернуть слово")); button.titleLabel?.font = .systemFont(ofSize: 14)
                 button.addAction(UIAction { [weak self] _ in self?.restoreDeletedWord() }, for: .touchUpInside); suggestions.addArrangedSubview(button)
             }
             return
@@ -1859,7 +1979,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             if suggestionSignature != signature {
                 clear(suggestions); suggestionSignature = signature
                 for (index, word) in glideWords.enumerated() {
-                    let button = makeButton(word, special: true); button.titleLabel?.font = .systemFont(ofSize: 15)
+                    let button = makeSuggestionButton(word); button.titleLabel?.font = .systemFont(ofSize: 15)
                     button.addAction(UIAction { [weak self] _ in self?.acceptGlide(index) }, for: .touchUpInside); suggestions.addArrangedSubview(button)
                 }
             }
@@ -1867,23 +1987,36 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         let context = textDocumentProxy.documentContextBeforeInput
         let prefix = context.map { LocalSuggestionProvider.trailingWord(in: String($0.suffix(64))) } ?? ""
-        let candidates = settings.suggestions && !prefix.isEmpty && prefix.count < 64 ? provider.suggestions(context: context ?? "", language: state.language) : []
+        let personalCandidates = settings.suggestions ? settings.personalLexicon.completions(for: prefix, limit: 3) : []
+        let corpusCandidates = settings.suggestions && !prefix.isEmpty && prefix.count < 64 ? provider.suggestions(context: context ?? "", language: state.language) : []
+        var seenCandidates = Set<String>()
+        let candidates = (personalCandidates + corpusCandidates).filter { seenCandidates.insert($0.lowercased()).inserted }
         let words = candidates.map { candidate in
             prefix.first?.isUppercase == true ? ((state.shift == .locked || (prefix.allSatisfy(\.isUppercase) && prefix.count > 1)) ? candidate.uppercased() : candidate.capitalized) : candidate
         }
         pendingPrefix = words.isEmpty ? nil : prefix
         suggestionWords = words
-        let signature = state.language.rawValue + "|" + prefix + "|" + words.joined(separator: "|")
+        let canOfferSave = words.isEmpty && settings.suggestions && (3...64).contains(prefix.count) &&
+            prefix.allSatisfy(\.isLetter) && !settings.personalLexicon.containsKnownWord(prefix) &&
+            textDocumentProxy.isSecureTextEntry != true && OfflineLexicon.preparedCheck(prefix, language: state.language)?.known == false
+        let signature = state.language.rawValue + "|" + prefix + "|" + words.joined(separator: "|") + (canOfferSave ? "|save" : "")
         guard suggestionSignature != signature else { return }
         suggestionSignature = signature
         if words.isEmpty {
-            if !suggestions.arrangedSubviews.isEmpty { clear(suggestions) }
+            clear(suggestions)
+            if canOfferSave {
+                let button = makeSuggestionButton("＋  " + localized("Добавить в личный словарь") + "  «" + prefix + "»")
+                button.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
+                button.accessibilityHint = localized("Слово будет сохранено только на этом устройстве")
+                button.addAction(UIAction { [weak self] _ in self?.saveCurrentWordToPersonalDictionary(prefix) }, for: .touchUpInside)
+                suggestions.addArrangedSubview(button)
+            }
             return
         }
         if suggestions.arrangedSubviews.count != words.count || !(suggestions.arrangedSubviews.first is UIButton) {
             clear(suggestions)
             for index in words.indices {
-                let button = makeButton(""); button.titleLabel?.font = .systemFont(ofSize: 16)
+                let button = makeSuggestionButton(""); button.titleLabel?.font = .systemFont(ofSize: 16)
                 button.addAction(UIAction { [weak self] _ in self?.acceptSuggestion(at: index) }, for: .touchUpInside)
                 suggestions.addArrangedSubview(button)
             }
@@ -1954,7 +2087,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private func dismissPopup() { popup?.removeFromSuperview(); popup = nil; popupLabels.removeAll(); popupValues.removeAll() }
     deinit {
-        if let pasteboardObserver { NotificationCenter.default.removeObserver(pasteboardObserver) }
         previewHide?.cancel(); settingsHintTask?.cancel(); trailTimer?.invalidate()
     }
 }

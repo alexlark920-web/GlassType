@@ -2,6 +2,23 @@ import XCTest
 @testable import KeyboardCore
 
 final class AutocorrectionTests: XCTestCase {
+    func testPersonalKnownWordsAreSuggestedAndLegacyDataStillDecodes() throws {
+        var lexicon = PersonalLexicon(knownWords: ["GlassType", "glasses"])
+        XCTAssertEqual(lexicon.completions(for: "gla"), ["GlassType", "glasses"])
+        XCTAssertTrue(lexicon.containsKnownWord("GLASSTYPE"))
+        lexicon.addKnownWord("GlassType")
+        XCTAssertEqual(lexicon.knownWords, ["GlassType", "glasses"])
+        let pipeline = AutocorrectionPipeline()
+        let customWord = PersonalLexicon(knownWords: ["teh"])
+        XCTAssertFalse(pipeline.needsDictionaryChecks(for: "teh", language: .english, personalLexicon: customWord))
+        XCTAssertNil(pipeline.replacement(for: "teh", language: .english, personalLexicon: customWord, offlineCheck: nil))
+
+        let legacy = Data(#"{"replacements":{"teh":"the"},"excludedWords":["foobar"]}"#.utf8)
+        let decoded = try JSONDecoder().decode(PersonalLexicon.self, from: legacy)
+        XCTAssertEqual(decoded.replacements["teh"], "the")
+        XCTAssertEqual(decoded.knownWords, [])
+    }
+
     private let engine = AutocorrectionEngine()
     private let pipeline = AutocorrectionPipeline()
 

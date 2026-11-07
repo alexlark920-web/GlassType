@@ -1,8 +1,8 @@
 import Foundation
 
 public enum BackspaceRepeat {
-    /// First repeat tick removes one character; subsequent ticks accelerate.
-    public static let initialDelay: TimeInterval = 0.16
+    /// The initial character is deleted on touch-down; repeat begins shortly after.
+    public static let initialDelay: TimeInterval = 0.12
     public static func interval(heldFor elapsed: TimeInterval) -> TimeInterval {
         guard elapsed.isFinite, elapsed >= 0 else { return 0.055 }
         if elapsed >= 2 { return 0.03 }

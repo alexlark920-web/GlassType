@@ -26,10 +26,30 @@ final class TouchAdaptationTests: XCTestCase {
         XCTAssertEqual(state.configuration(landscape: false, enabled: true).offsetX, 0.1, accuracy: 1e-8)
         XCTAssertEqual(state.configuration(landscape: true, enabled: true).offsetX, 0)
         XCTAssertEqual(state.configuration(landscape: false, enabled: false).offsetX, 0)
+        XCTAssertLessThan(state.configuration(landscape: false, enabled: true).sigmaX, 0.34)
+        XCTAssertEqual(state.configuration(landscape: false, enabled: false).sigmaX, 0.34)
         XCTAssertEqual(state.portrait.count, 140)
         state = TouchAdaptationState()
         XCTAssertEqual(state.portrait.count, 0)
         XCTAssertEqual(state.landscape.count, 0)
+    }
+
+    func testTapSpreadLearnsBoundedProbabilityWidthWithoutStoringSamples() throws {
+        var stable = TouchOffsetStatistics()
+        for _ in 0..<192 { stable.observe(x: 0.08, y: -0.04) }
+        XCTAssertEqual(stable.learnedSigmaX, 0.24, accuracy: 1e-8)
+
+        var variable = TouchOffsetStatistics()
+        for index in 0..<192 {
+            let value = index.isMultiple(of: 2) ? -0.34 : 0.34
+            variable.observe(x: value, y: value)
+        }
+        XCTAssertGreaterThan(variable.learnedSigmaX, stable.learnedSigmaX)
+        XCTAssertLessThanOrEqual(variable.learnedSigmaX, 0.46)
+        let data = try JSONEncoder().encode(variable)
+        XCTAssertLessThan(data.count, 1024)
+        let decoded = try JSONDecoder().decode(TouchOffsetStatistics.self, from: data)
+        XCTAssertEqual(decoded, variable)
     }
     func testPersistenceHasNoTextOrRawHistoryAndRoundTrips() throws {
         var state = TouchAdaptationState()

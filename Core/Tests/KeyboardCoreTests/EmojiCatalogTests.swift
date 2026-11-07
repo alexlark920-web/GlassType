@@ -29,4 +29,14 @@ final class EmojiCatalogTests: XCTestCase {
             XCTAssertNotEqual(GlassTypeText.translate(category.titleKey, to: .ukrainian), category.titleKey)
         }
     }
+
+    func testEmojiSearchMatchesAnnotationsLocalizedAliasesAndSequences() {
+        let items = EmojiCatalog.bundled().sections.flatMap(\.entries)
+        XCTAssertTrue(EmojiSearch.search("grinning face", in: items).contains { $0.emoji == "😀" })
+        XCTAssertTrue(EmojiSearch.search("СЕРДЦЕ", in: items).contains { $0.emoji == "❤️" })
+        XCTAssertTrue(EmojiSearch.search("кіт", in: items).contains { $0.emoji == "🐈" || $0.emoji == "🐈‍⬛" })
+        XCTAssertTrue(EmojiSearch.search("🇺🇦", in: items).contains { $0.emoji == "🇺🇦" })
+        XCTAssertTrue(EmojiSearch.search("   ", in: items).isEmpty)
+        XCTAssertEqual(EmojiSearch.search("heart", in: items, limit: 5).count, 5)
+    }
 }
