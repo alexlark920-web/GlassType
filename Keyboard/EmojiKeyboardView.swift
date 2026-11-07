@@ -26,8 +26,12 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
     private var backspaceHandler: EmojiBackspaceHandler?
 
     private var visibleItems: [EmojiItem] {
-        guard let selectedSection, catalog.sections.indices.contains(selectedSection) else { return allItems }
-        return catalog.sections[selectedSection].entries
+        let source: [EmojiItem]
+        if let selectedSection, catalog.sections.indices.contains(selectedSection) {
+            source = catalog.sections[selectedSection].entries
+        } else { source = allItems }
+        let defaults = UserDefaults.standard.dictionary(forKey: "GlassType.emojiToneDefaults") as? [String: String] ?? [:]
+        return EmojiVariants.collapsed(source, preferred: defaults)
     }
 
     init(catalog: EmojiCatalog, theme: KeyboardTheme, interfaceLanguage: InterfaceLanguage,
@@ -237,9 +241,29 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
         onSelectEmoji?(visibleItems[indexPath.item].emoji)
     }
 
+    func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath,
+                        point: CGPoint) -> UIContextMenuConfiguration? {
+        guard visibleItems.indices.contains(indexPath.item) else { return nil }
+        let item = visibleItems[indexPath.item]
+        let choices = EmojiVariants.choices(for: item.emoji, among: allItems)
+        guard choices.count > 1 else { return nil }
+        return UIContextMenuConfiguration(identifier: item.emoji as NSString, previewProvider: nil) { [weak self] _ in
+            UIMenu(title: item.name, children: choices.map { choice in
+                UIAction(title: choice.emoji) { [weak self] _ in
+                    var defaults = UserDefaults.standard.dictionary(forKey: "GlassType.emojiToneDefaults") as? [String: String] ?? [:]
+                    defaults[EmojiVariants.base(of: choice.emoji)] = choice.emoji
+                    UserDefaults.standard.set(defaults, forKey: "GlassType.emojiToneDefaults")
+                    self?.grid.reloadData()
+                    self?.onSelectEmoji?(choice.emoji)
+                }
+            })
+        }
+    }
+
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
-        CGSize(width: 42, height: 42)
+        let height = max(34, (collectionView.bounds.height - collectionView.contentInset.top - collectionView.contentInset.bottom - 9) / 4)
+        return CGSize(width: height, height: height)
     }
 
     private func installBackspaceRepeat(on button: UIButton, deleteLabel: String) {

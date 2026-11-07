@@ -45,6 +45,34 @@ public struct EmojiItem: Equatable, Hashable, Identifiable {
     }
 }
 
+/// Groups skin-tone variants under one base glyph. The picker shows the base
+/// tone by default; callers can persist the selected sequence per base glyph.
+public enum EmojiVariants {
+    public static func base(of emoji: String) -> String {
+        String(String.UnicodeScalarView(emoji.unicodeScalars.filter { !(0x1F3FB...0x1F3FF).contains($0.value) }))
+    }
+
+    public static func collapsed(_ items: [EmojiItem], preferred: [String: String] = [:]) -> [EmojiItem] {
+        var grouped: [String: [EmojiItem]] = [:]
+        var order: [String] = []
+        for item in items {
+            let key = base(of: item.emoji)
+            if grouped[key] == nil { order.append(key) }
+            grouped[key, default: []].append(item)
+        }
+        return order.compactMap { key in
+            guard let variants = grouped[key], !variants.isEmpty else { return nil }
+            return variants.first(where: { $0.emoji == preferred[key] })
+                ?? variants.first(where: { $0.emoji == key }) ?? variants[0]
+        }
+    }
+
+    public static func choices(for emoji: String, among items: [EmojiItem]) -> [EmojiItem] {
+        let key = base(of: emoji)
+        return items.filter { base(of: $0.emoji) == key }
+    }
+}
+
 public struct EmojiSection: Equatable, Identifiable {
     public let category: EmojiCategory
     public let entries: [EmojiItem]

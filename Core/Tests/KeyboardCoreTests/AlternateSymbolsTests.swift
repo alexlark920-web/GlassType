@@ -21,9 +21,15 @@ final class AlternateSymbolsTests: XCTestCase {
         XCTAssertEqual(KeyboardLanguage.ukrainian.holdAlternatives(for: "Г", symbolsEnabled: true), ["7", "ґ"])
     }
     func testLocaleCurrency() {
-        for (language, currency) in [(KeyboardLanguage.english, "$"), (.russian, "₽"), (.ukrainian, "₴")] {
+        for language in KeyboardLanguage.allCases {
             let key = language.rows[1][2]
-            XCTAssertEqual(language.holdAlternatives(for: key, symbolsEnabled: true).first, currency)
+            XCTAssertEqual(language.holdAlternatives(for: key, symbolsEnabled: true), ["€", "₽", "₴"])
+        }
+    }
+    func testCurrencyKeysAndHoldVariants() {
+        XCTAssertTrue(SymbolPage.numbers.rows.flatMap { $0 }.contains("$"))
+        for language in KeyboardLanguage.allCases {
+            XCTAssertEqual(language.holdAlternatives(for: "$", symbolsEnabled: true), ["€", "₽", "₴"])
         }
     }
     func testAllKeysHaveDistinctNonemptyHoldChoices() {

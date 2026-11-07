@@ -12,9 +12,11 @@ extension KeyboardLanguage {
             ["@", "#", currencySymbol, "%", "&", "-", "+", "(", ")", "/", "="],
             ["*", "\"", "'", ":", ";", "!", "?", "…", ","]
         ]
+        if base == "$" { return ["€", "₽", "₴"] + variants }
         for (row, keys) in rows.enumerated() {
             if let column = keys.firstIndex(of: base) {
                 let symbol = punctuation[row][column]
+                if symbol == "$" { return ["€", "₽", "₴"] }
                 return [symbol] + variants.filter { $0 != symbol }
             }
         }
@@ -23,7 +25,7 @@ extension KeyboardLanguage {
     private var currencySymbol: String {
         switch self {
         case .english: return "$"
-        case .russian: return "₽"
+        case .russian: return "$"
         case .ukrainian: return "₴"
         }
     }

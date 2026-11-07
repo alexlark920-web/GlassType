@@ -39,4 +39,12 @@ final class EmojiCatalogTests: XCTestCase {
         XCTAssertTrue(EmojiSearch.search("   ", in: items).isEmpty)
         XCTAssertEqual(EmojiSearch.search("heart", in: items, limit: 5).count, 5)
     }
+
+    func testSkinToneVariantsCollapseAndCanBecomePreferredDefault() {
+        let items = [EmojiItem(emoji: "👍", name: "thumbs up"), EmojiItem(emoji: "👍🏻", name: "thumbs up light skin tone"),
+                     EmojiItem(emoji: "👍🏽", name: "thumbs up medium skin tone")]
+        XCTAssertEqual(EmojiVariants.collapsed(items).map(\.emoji), ["👍"])
+        XCTAssertEqual(EmojiVariants.choices(for: "👍", among: items).map(\.emoji), ["👍", "👍🏻", "👍🏽"])
+        XCTAssertEqual(EmojiVariants.collapsed(items, preferred: ["👍": "👍🏽"]).map(\.emoji), ["👍🏽"])
+    }
 }
