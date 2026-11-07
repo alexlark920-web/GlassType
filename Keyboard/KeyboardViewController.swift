@@ -10,6 +10,7 @@ private class KeyButton: UIButton {
     private let pressShade = UIView()
     private let sheen = CAGradientLayer()
     private var trackpadAppearance = false
+    var routedHighlight = false { didSet { updatePressAppearance(animated: true) } }
     var showsCharacterPreview = false
     weak var touchSurface: KeyboardTouchSurface?
     var geometryIndex = -1
@@ -117,7 +118,7 @@ private class KeyButton: UIButton {
         }
     }
     private func updatePressAppearance(animated: Bool) {
-        let down = isHighlighted && !trackpadAppearance
+        let down = (isHighlighted || routedHighlight) && !trackpadAppearance
         let dark = traitCollection.userInterfaceStyle == .dark
         let reducedMotion = UIAccessibility.isReduceMotionEnabled
         let lifts = pressBehavior == .character
@@ -129,7 +130,6 @@ private class KeyButton: UIButton {
         }
         let changes = {
             self.face.alpha = self.trackpadAppearance ? 0.30 : 1
-            self.pressShade.alpha = down ? pressedAlpha : 0
             let transform = down && lifts && !reducedMotion ? CGAffineTransform(translationX: 0, y: -2.2).scaledBy(x: 1.025, y: 1.035) : .identity
             self.face.transform = transform
             self.face.layer.shadowOpacity = self.trackpadAppearance ? 0 : (down && lifts ? (dark ? 0.22 : 0.14) : (dark ? 0.10 : 0.07))
@@ -138,17 +138,76 @@ private class KeyButton: UIButton {
                 child.alpha = self.trackpadAppearance ? 0 : 1
             }
         }
+        pressShade.layer.removeAllAnimations(); pressShade.alpha = down ? pressedAlpha : 0
         if !animated || reducedMotion { changes() }
         else if !lifts {
-            UIView.animate(withDuration: 0.09, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut], animations: changes)
+            UIView.animate(withDuration: 0.06, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut], animations: changes)
         } else {
-            UIView.animate(withDuration: down ? 0.12 : 0.24, delay: 0,
-                           usingSpringWithDamping: down ? 0.74 : 0.64,
+            UIView.animate(withDuration: down ? 0.065 : 0.14, delay: 0,
+                           usingSpringWithDamping: down ? 0.88 : 0.82,
                            initialSpringVelocity: down ? 0.7 : 0.9,
                            options: [.beginFromCurrentState, .allowUserInteraction], animations: changes)
         }
     }
     deinit { NotificationCenter.default.removeObserver(self) }
+}
+
+/// UIKit keeps one original receiver per finger; this text control explicitly
+/// follows a candidate until lift. Function controls retain their own tracking.
+private final class TextKeyButton: KeyButton {
+    var textValue = ""
+    var commit: ((String) -> Void)?
+    private var contact = TextTouchSession()
+    private var revision: UInt = 0
+    private var presented: Int?
+    override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
+        cancelContact()
+        guard let surface = touchSurface, let model = surface.recognizer,
+              super.beginTracking(touch, with: event) else { return false }
+        revision = surface.revision
+        contact.begin(at: touch.location(in: surface), keyIndex: geometryIndex, model: model)
+        select(contact.selectedKey)
+        isHighlighted = false
+        return contact.phase == .tracking
+    }
+    override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
+        guard let surface = touchSurface, revision == surface.revision, let model = surface.recognizer,
+              contact.phase == .tracking else { cancelContact(); return false }
+        select(contact.move(to: touch.location(in: surface), model: model))
+        isHighlighted = false
+        return true
+    }
+    override func endTracking(_ touch: UITouch?, with event: UIEvent?) {
+        guard let touch, let surface = touchSurface, revision == surface.revision,
+              surface.canCommitText?() != false, window != nil, let model = surface.recognizer, contact.phase == .tracking else {
+            cancelContact(); super.cancelTracking(with: event); return
+        }
+        let index = contact.end(at: touch.location(in: surface), model: model)
+        select(index)
+        let value = index.flatMap { model.geometry.keys[$0].role.character }
+        surface.finishSelection(presented, cancelled: value == nil, revision: revision)
+        presented = nil; isHighlighted = false
+        super.endTracking(touch, with: event)
+        if let value { commit?(value) }
+    }
+    override func cancelTracking(with event: UIEvent?) {
+        cancelContact(); super.cancelTracking(with: event)
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow(); if window == nil { cancelContact() }
+    }
+    override func accessibilityActivate() -> Bool {
+        guard isEnabled, !textValue.isEmpty else { return false }
+        commit?(textValue); return true
+    }
+    private func select(_ index: Int?) {
+        touchSurface?.changeSelection(from: presented, to: index, revision: revision)
+        presented = index
+    }
+    private func cancelContact() {
+        touchSurface?.finishSelection(presented, cancelled: true, revision: revision)
+        presented = nil; contact.cancel(); isHighlighted = false
+    }
 }
 
 /// One reusable silhouette, always clamped to the extension's bounds.
@@ -282,23 +341,25 @@ private final class DeleteKeyButton: KeyButton {
     var deleteAction: (() -> Void)?
     var deleteWordAction: (() -> Void)?
     var canSwipeWord: (() -> Bool)?
-    private var delay: Timer?, repeatTimer: Timer?
+    private var delay: Timer?
     private var start: CGPoint = .zero
     private var swiped = false, repeated = false, deleteGestureActive = false
     override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         cancelInteraction(); _ = super.beginTracking(touch, with: event)
         deleteGestureActive = true; start = touch.location(in: self); isHighlighted = true
-        let timer = Timer(timeInterval: 0.4, repeats: false) { [weak self] _ in
+        heldSince = ProcessInfo.processInfo.systemUptime
+        scheduleRepeat(after: BackspaceRepeat.initialDelay)
+        return true
+    }
+    private var heldSince: TimeInterval = 0
+    private func scheduleRepeat(after interval: TimeInterval) {
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             guard let self, self.deleteGestureActive, !self.swiped else { return }
             self.repeated = true; self.deleteAction?()
-            guard self.deleteGestureActive else { return }
-            let repeating = Timer(timeInterval: 0.075, repeats: true) { [weak self] _ in
-                guard let self, self.deleteGestureActive else { return }; self.deleteAction?()
-            }
-            self.repeatTimer = repeating; RunLoop.main.add(repeating, forMode: .common)
+            guard self.deleteGestureActive, !self.swiped else { return }
+            self.scheduleRepeat(after: BackspaceRepeat.interval(heldFor: ProcessInfo.processInfo.systemUptime - self.heldSince))
         }
         delay = timer; RunLoop.main.add(timer, forMode: .common)
-        return true
     }
     override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         guard deleteGestureActive else { return false }
@@ -306,9 +367,13 @@ private final class DeleteKeyButton: KeyButton {
         if !repeated, canSwipeWord?() == true, p.x - start.x < -32, abs(p.y - start.y) < abs(p.x - start.x) * 0.6 {
             swiped = true; delay?.invalidate(); delay = nil
         }
-        if !bounds.contains(p), !swiped {
-            delay?.invalidate(); delay = nil; repeatTimer?.invalidate(); repeatTimer = nil
+        if !point(inside: p, with: event), !swiped {
+            delay?.invalidate(); delay = nil
             if repeated { isHighlighted = false }
+        } else if !swiped && delay == nil {
+            isHighlighted = true
+            let elapsed = ProcessInfo.processInfo.systemUptime - heldSince
+            scheduleRepeat(after: max(0.035, BackspaceRepeat.initialDelay - elapsed))
         }
         return true
     }
@@ -317,15 +382,15 @@ private final class DeleteKeyButton: KeyButton {
         let p = touch?.location(in: self) ?? start
         let eligible = !repeated && canSwipeWord?() == true
         let word = (swiped || eligible) && p.x - start.x < -32 && abs(p.y - start.y) < abs(p.x - start.x) * 0.6
-        let tap = !swiped && !repeated && touch != nil && bounds.contains(p)
+        let tap = !swiped && !repeated && touch != nil && point(inside: p, with: event)
         cancelInteraction(); super.endTracking(touch, with: event)
         if word { deleteWordAction?() } else if tap { deleteAction?() }
     }
     override func cancelTracking(with event: UIEvent?) { cancelInteraction(); super.cancelTracking(with: event) }
     override func didMoveToWindow() { super.didMoveToWindow(); if window == nil { cancelInteraction() } }
-    func cancelInteraction() { deleteGestureActive = false; delay?.invalidate(); delay = nil; repeatTimer?.invalidate(); repeatTimer = nil; swiped = false; repeated = false; isHighlighted = false }
+    func cancelInteraction() { deleteGestureActive = false; delay?.invalidate(); delay = nil; swiped = false; repeated = false; isHighlighted = false }
     override func accessibilityActivate() -> Bool { deleteAction?(); return true }
-    deinit { delay?.invalidate(); repeatTimer?.invalidate() }
+    deinit { delay?.invalidate() }
 }
 
 /// UIKit adapter uses the device's local dictionary, without learning words.
@@ -385,6 +450,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private weak var languageButton: KeyButton?
     private var settingsHintTask: DispatchWorkItem?
     private var renderedShift: String?
+    private var renderedLetterCase: Bool?
     private weak var spaceButton: SpacebarButton?
     private var cursorMode = false
     private var cursorDocument: String?
@@ -416,7 +482,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             let a = self.keyPlane.keyIndex(at: self.view.convert(first, to: self.keyPlane))
             let b = self.keyPlane.keyIndex(at: self.view.convert(last, to: self.keyPlane))
             guard let b, let key = self.keyPlane.recognizer?.geometry.keys[b], key.role.character?.allSatisfy(\.isLetter) == true else { return false }
-            return GlideActivation.shouldBegin(start: first, current: last, startKey: a, currentKey: b)
+            let pitch = self.keyPlane.recognizer?.geometry.pitch ?? .zero
+            return GlideActivation.shouldBegin(start: first, current: last, startKey: a, currentKey: b,
+                                              minimumDistance: GlideActivation.minimumTravel(keyPitch: pitch))
         }
         return pan
     }()
@@ -446,6 +514,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         keyPlane.canLearn = { [weak self] in self?.canLearnTouch == true }
         keyPlane.didLearn = { [weak self] x, y in self?.learnTouch(x: x, y: y) }
+        keyPlane.canCommitText = { [weak self] in self?.cursorMode == false && self?.settingsPanel == nil }
+        keyPlane.didChangePress = { button, down in (button as? KeyButton)?.routedHighlight = down }
+        keyPlane.didSelectTextKey = { [weak self] button in
+            guard let key = button as? KeyButton else { return }
+            self?.showKeyPreview(for: key)
+        }
+        keyPlane.didFinishTextKey = { [weak self] button, cancelled in
+            guard let key = button as? KeyButton else { return }
+            self?.finishKeyPreview(for: key, immediately: cancelled)
+        }
         glideTrail.fillColor = nil; glideTrail.lineWidth = 3; glideTrail.lineCap = .round; glideTrail.lineJoin = .round
         view.layer.addSublayer(glideTrail)
         keyPreview.isHidden = true; view.addSubview(keyPreview)
@@ -503,7 +581,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private func rebuild() {
         cancelGlide(); lastSpace = nil; glideWords = []; glideUndo = nil; deletionUndo = nil
         hideKeyPreview(); spaceButton?.cancelInteraction(); spaceButton = nil; symbolsButton = nil
-        stopDeleting(); dismissPopup(); hideLocalSettings(); clear(rows); clear(toolbar); clear(suggestions); letterButtons.removeAll(); shiftButton = nil; renderedShift = nil
+        stopDeleting(); dismissPopup(); hideLocalSettings(); clear(rows); clear(toolbar); clear(suggestions); letterButtons.removeAll(); shiftButton = nil; renderedShift = nil; renderedLetterCase = nil
         suggestionSignature = nil; suggestionWords.removeAll(); correctionUndo = nil
         view.setNeedsLayout()
         suggestions.axis = .horizontal; suggestions.distribution = .fillEqually; suggestions.spacing = 6
@@ -534,7 +612,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             for key in keys {
                 let button = makeButton(key)
                 button.accessibilityLabel = key
-                button.addAction(UIAction { [weak self] _ in self?.insert(key) }, for: .touchUpInside)
+                configureTextAction(button, text: key)
                 let alternatives = state.symbols ? state.language.alternatives(for: key) : state.language.holdAlternatives(for: key, symbolsEnabled: settings.extraSymbols)
                 configureHold(on: button, alternatives: alternatives)
                 letterButtons.append((button, key)); attach(button)
@@ -591,7 +669,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             attach(systemKeyboard)
         }
         let comma = makeButton(","); comma.accessibilityLabel = "Запятая"
-        comma.addAction(UIAction { [weak self] _ in self?.insert(",") }, for: .touchUpInside)
+        configureTextAction(comma, text: ",")
         attach(comma)
         let space = SpacebarButton(frame: .zero)
         configureButton(space, title: spaceTitle())
@@ -608,7 +686,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             UIAccessibilityCustomAction(name: "Курсор вправо") { [weak self] _ in self?.moveCursor(1); return true }
         ]
         attach(space)
-        let punctuation = makeButton("."); punctuation.addAction(UIAction { [weak self] _ in self?.insert(".") }, for: .touchUpInside)
+        let punctuation = makeButton("."); configureTextAction(punctuation, text: ".")
         configureHold(on: punctuation, alternatives: state.language.alternatives(for: "."))
         attach(punctuation)
         let enter = makeButton("", special: true)
@@ -625,11 +703,18 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         refreshLabels(); refreshSuggestions()
     }
     private func makeButton(_ title: String, special: Bool = false) -> UIButton {
-        let button: KeyButton = title == "⌫" ? DeleteKeyButton(frame: .zero) : KeyButton(frame: .zero)
+        let button: KeyButton
+        if title == "⌫" { button = DeleteKeyButton(frame: .zero) }
+        else if !special && title.count == 1 { button = TextKeyButton(frame: .zero) }
+        else { button = KeyButton(frame: .zero) }
         configureButton(button, title: title)
         button.showsCharacterPreview = !special && title.count == 1
         button.pressBehavior = !special && title.count == 1 ? .character : .function
         return button
+    }
+    private func configureTextAction(_ button: UIButton, text: String) {
+        (button as? TextKeyButton)?.textValue = text
+        (button as? TextKeyButton)?.commit = { [weak self] value in self?.insert(value) }
     }
     private func configureButton(_ button: KeyButton, title: String) {
         button.compact = settings.compactKeys
@@ -641,6 +726,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         button.fillColor = button is SpacebarButton ? theme.spacebar : theme.key
         button.pressBehavior = button is SpacebarButton ? .spacebar : .function
         button.addAction(UIAction { [weak self, weak button] _ in
+            self?.synchronizeCapitalization(); self?.refreshLabels()
             self?.performFeedback()
             if let button {
                 if button === self?.languageButton { self?.scheduleSettingsHint(for: button) }
@@ -648,13 +734,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             }
         }, for: .touchDown)
         button.addAction(UIAction { [weak self, weak button] _ in
-            if let button { self?.finishKeyPreview(for: button, immediately: false) }
+            if let button, !(button is TextKeyButton) { self?.finishKeyPreview(for: button, immediately: false) }
         }, for: .touchUpInside)
         button.addAction(UIAction { [weak self, weak button] _ in
-            if let button { self?.finishKeyPreview(for: button, immediately: true) }
+            if let button, !(button is TextKeyButton) { self?.finishKeyPreview(for: button, immediately: true) }
         }, for: [.touchUpOutside, .touchCancel, .touchDragExit])
         button.addAction(UIAction { [weak self, weak button] _ in
-            if let button { self?.showKeyPreview(for: button) }
+            if let button, !(button is TextKeyButton) { self?.showKeyPreview(for: button) }
         }, for: .touchDragEnter)
     }
     private func keyFontSize() -> CGFloat {
@@ -755,6 +841,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         guard !alternatives.isEmpty else { return }
         let press = UILongPressGestureRecognizer(target: self, action: #selector(alternatePress(_:)))
         press.minimumPressDuration = settings.holdDelay
+        press.allowableMovement = 8
         press.delaysTouchesBegan = false; press.delaysTouchesEnded = false
         button.addGestureRecognizer(press)
         button.accessibilityHint = "Удерживайте для: " + alternatives.joined(separator: ", ")
@@ -1045,7 +1132,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         update(rows)
         spaceButton?.setTitle(active ? "↔" : spaceTitle(), for: .normal)
         spaceButton?.accessibilityValue = active ? "Управление курсором" : state.language.title
-        if active { dismissPopup(); stopDeleting(); performFeedback() }
+        if active {
+            for button in keyPlane.keyViews where button is TextKeyButton { button.cancelTracking(with: nil) }
+            dismissPopup(); stopDeleting(); performFeedback()
+        }
         else { updateContext() }
     }
     private func cancelCursorIfDocumentChanged() {
@@ -1230,6 +1320,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             guard settings.glideTyping, !state.symbols, !cursorMode, settingsPanel == nil, lexiconEditing == nil, textAllowsAutomation,
                   let snapshot = glideSnapshot, glideSnapshotMatches(snapshot) else { cancelGlide(); return }
             let points = pan.points
+            if let model = keyPlane.recognizer, GlideActivation.isShortStroke(points, keyPitch: model.geometry.pitch),
+               let end = points.last, let result = model.resolve(view.convert(end, to: keyPlane)),
+               let character = model.geometry.keys[result.first.keyIndex].role.character {
+                cancelGlide(); insert(character); return
+            }
             var centers: [String: CGPoint] = [:]
             if let geometry = keyPlane.recognizer?.geometry {
                 for key in geometry.keys {
@@ -1269,7 +1364,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             label.textAlignment = .center; label.font = .systemFont(ofSize: 13); suggestions.addArrangedSubview(label)
             return
         }
-        let inserted = state.inserted(best)
+        synchronizeCapitalization()
+        let inserted = state.insertedWord(best)
         let prefix = snapshot.0?.last.map({ $0.isLetter || $0.isNumber }) == true ? " " : ""
         correctionUndo = nil; suppressedCorrection = nil
         textDocumentProxy.insertText(prefix + inserted + " ")
@@ -1322,6 +1418,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private func insert(_ text: String) {
         glideGeneration &+= 1
         if lexiconEditing != nil { editLexicon(text); return }
+        synchronizeCapitalization()
         deletionUndo = nil; glideWords = []; glideUndo = nil
         if text == " ", settings.doubleSpacePeriod, let last = lastSpace,
            last.document == String(describing: textDocumentProxy.documentIdentifier),
@@ -1409,9 +1506,13 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         state.tapShift(at: ProcessInfo.processInfo.systemUptime); refreshLabels()
     }
     private func refreshLabels() {
-        for (button, key) in letterButtons {
-            let value = state.symbols || state.shift == .off ? key : key.uppercased()
-            if button.title(for: .normal) != value { button.setTitle(value, for: .normal); button.accessibilityLabel = value }
+        let uppercase = !state.symbols && state.shift != .off
+        if renderedLetterCase != uppercase {
+            for (button, key) in letterButtons {
+                let value = state.symbols || state.shift == .off ? key : key.uppercased()
+                if button.title(for: .normal) != value { button.setTitle(value, for: .normal); button.accessibilityLabel = value }
+            }
+            renderedLetterCase = uppercase
         }
         if state.symbols {
             let identity = "page:" + state.symbolPage.switchTitle
@@ -1449,6 +1550,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         updateContext()
     }
+    private func synchronizeCapitalization() {
+        guard lexiconEditing == nil else { return }
+        state.synchronize(context: textDocumentProxy.documentContextBeforeInput,
+                          autoCapitalization: settings.autoCapitalization && textAllowsAutomation,
+                          fieldIsEmpty: !textDocumentProxy.hasText)
+    }
     private func updateContext() {
         guard !cursorMode else { return }
         if lexiconEditing != nil {
@@ -1456,7 +1563,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             draftLabel?.text = editorPrompt + currentDraft + "▏"
             refreshLabels(); return
         }
-        state.synchronize(context: textDocumentProxy.documentContextBeforeInput, autoCapitalization: settings.autoCapitalization && textAllowsAutomation)
+        synchronizeCapitalization()
         refreshLabels(); refreshSuggestions()
     }
     private func refreshSuggestions() {
@@ -1484,7 +1591,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let prefix = context.map { LocalSuggestionProvider.trailingWord(in: String($0.suffix(64))) } ?? ""
         let candidates = settings.suggestions && !prefix.isEmpty && prefix.count < 64 ? provider.suggestions(context: context ?? "", language: state.language) : []
         let words = candidates.map { candidate in
-            prefix.first?.isUppercase == true ? (prefix.allSatisfy(\.isUppercase) && prefix.count > 1 ? candidate.uppercased() : candidate.capitalized) : candidate
+            prefix.first?.isUppercase == true ? ((state.shift == .locked || (prefix.allSatisfy(\.isUppercase) && prefix.count > 1)) ? candidate.uppercased() : candidate.capitalized) : candidate
         }
         pendingPrefix = words.isEmpty ? nil : prefix
         suggestionWords = words
@@ -1516,7 +1623,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
               textDocumentProxy.selectedText == nil else { updateContext(); return }
         correctionUndo = nil; suppressedCorrection = nil
         for _ in prefix { textDocumentProxy.deleteBackward() }
-        textDocumentProxy.insertText(word + " "); updateContext()
+        synchronizeCapitalization()
+        textDocumentProxy.insertText(state.insertedWord(word) + " "); updateContext()
     }
     @objc private func alternatePress(_ gesture: UILongPressGestureRecognizer) {
         guard let button = gesture.view as? UIButton else { return }

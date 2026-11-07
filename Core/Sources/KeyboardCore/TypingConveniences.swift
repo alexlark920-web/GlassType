@@ -78,7 +78,11 @@ public enum SentenceCapitalization {
     public static func shouldCapitalize(contextBeforeInput context: String?) -> Bool {
         guard let context else { return false }
         if context.isEmpty { return true }
-        let suffix = String(context.suffix(160))
+        let bounded = context.suffix(161)
+        let suffix = String(bounded.suffix(160))
+        // Opening quotes, whitespace and a greeting emoji do not consume the
+        // first cased letter of a message. A number/identifier does.
+        if bounded.count <= 160 && !suffix.contains(where: { $0.isLetter || $0.isNumber }) { return true }
         if suffix.last?.isNewline == true { return true }
         let hasSeparator = suffix.last?.isWhitespace == true
         let trimmed = suffix.reversed().drop(while: { $0.isWhitespace && !$0.isNewline })

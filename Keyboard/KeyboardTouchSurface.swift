@@ -12,6 +12,12 @@ final class KeyboardTouchSurface: UIView {
     var didLayoutKey: ((UIButton, KeyboardKeyGeometry) -> Void)?
     var canLearn: (() -> Bool)?
     var didLearn: ((Double, Double) -> Void)?
+    var didSelectTextKey: ((UIButton) -> Void)?
+    var didFinishTextKey: ((UIButton, Bool) -> Void)?
+    var didChangePress: ((UIButton, Bool) -> Void)?
+    var canCommitText: (() -> Bool)?
+    private(set) var revision: UInt = 0
+    private var presses: [UInt8] = []
     private(set) var recognizer: TouchRecognizer?
     private var configuration = TouchRecognitionConfiguration()
     private var previousBounds: CGRect = .null
@@ -25,8 +31,12 @@ final class KeyboardTouchSurface: UIView {
         addSubview(debug)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func invalidateGeometry() { previousBounds = .null; setNeedsLayout() }
+    func invalidateGeometry() { revision &+= 1; resetPresses(); previousBounds = .null; setNeedsLayout() }
     func setConfiguration(_ value: TouchRecognitionConfiguration) {
+        if value.offsetX != configuration.offsetX || value.offsetY != configuration.offsetY ||
+           value.sigmaX != configuration.sigmaX || value.sigmaY != configuration.sigmaY || value.languageWeight != configuration.languageWeight {
+            revision &+= 1; resetPresses()
+        }
         configuration = value
         if let geometry = recognizer?.geometry { recognizer = TouchRecognizer(geometry: geometry, configuration: value) }
         updateDebug()
@@ -34,11 +44,13 @@ final class KeyboardTouchSurface: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         guard bounds != previousBounds else { return }
+        revision &+= 1; resetPresses()
         previousBounds = bounds
         let geometry = KeyboardGeometry.make(bounds: bounds, language: language, symbolPage: symbolPage,
                                               compact: compact, needsSystemKey: needsSystemKey)
         guard geometry.keys.count == keyViews.count else { recognizer = nil; return }
         recognizer = TouchRecognizer(geometry: geometry, configuration: configuration)
+        presses = Array(repeating: 0, count: keyViews.count)
         for key in geometry.keys {
             let button = keyViews[key.index]
             button.frame = key.slotFrame
@@ -47,6 +59,28 @@ final class KeyboardTouchSurface: UIView {
         debug.frame = bounds; bringSubviewToFront(debug); updateDebug()
     }
     func keyIndex(at point: CGPoint) -> Int? { recognizer?.resolve(point)?.first.keyIndex }
+    func changeSelection(from previous: Int?, to selected: Int?, revision token: UInt) {
+        guard token == revision, previous != selected else { return }
+        if let previous, presses.indices.contains(previous), presses[previous] > 0 {
+            presses[previous] -= 1; didChangePress?(keyViews[previous], presses[previous] > 0)
+        }
+        if let selected, presses.indices.contains(selected) {
+            presses[selected] = min(8, presses[selected] + 1)
+            didChangePress?(keyViews[selected], true)
+            didSelectTextKey?(keyViews[selected])
+        }
+    }
+    func finishSelection(_ index: Int?, cancelled: Bool, revision token: UInt) {
+        guard token == revision, let index, keyViews.indices.contains(index) else { return }
+        didFinishTextKey?(keyViews[index], cancelled)
+        changeSelection(from: index, to: nil, revision: token)
+    }
+    private func resetPresses() {
+        for index in presses.indices where presses[index] > 0 && keyViews.indices.contains(index) {
+            didChangePress?(keyViews[index], false)
+        }
+        presses.removeAll(keepingCapacity: true)
+    }
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard !isHidden, alpha > 0.01, isUserInteractionEnabled else { return nil }
         if previousBounds != bounds { layoutIfNeeded() }

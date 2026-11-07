@@ -34,8 +34,20 @@ public struct InputState {
     public mutating func inserted(_ text: String) -> String {
         guard !symbols else { lastShift = nil; return text }
         let result = shift == .off ? text : text.uppercased()
-        if shift == .once { shift = .off; automaticShift = false }
+        if shift == .once && text.contains(where: { $0.isLetter }) { shift = .off; automaticShift = false }
         lastShift = nil
+        return result
+    }
+    /// One-shot shift affects one letter in a completed word; Caps Lock affects
+    /// the whole word. Used by glide and explicit suggestion acceptance.
+    public mutating func insertedWord(_ text: String) -> String {
+        guard !symbols else { lastShift = nil; return text }
+        let originalShift = shift
+        _ = inserted(text)
+        if originalShift == .locked { return text.uppercased() }
+        guard originalShift == .once, let index = text.firstIndex(where: { $0.isLetter }) else { return text }
+        var result = text
+        result.replaceSubrange(index...index, with: String(text[index]).uppercased())
         return result
     }
     public mutating func nextLanguage(enabled: [KeyboardLanguage]) {
@@ -47,8 +59,15 @@ public struct InputState {
         let offset = direction == .next ? 1 : -1
         language = enabled[(index + offset + enabled.count) % enabled.count]
     }
-    public mutating func synchronize(context: String?, autoCapitalization: Bool) {
-        guard shift != .locked, let context else { return }
+    public mutating func synchronize(context: String?, autoCapitalization: Bool, fieldIsEmpty: Bool = false) {
+        // hasText=false is distinct from missing proxy context. Never interpret
+        // nil alone as an empty message, including at a mid-document caret.
+        guard shift != .locked else { return }
+        if !autoCapitalization && automaticShift { shift = .off; automaticShift = false }
+        guard let context = fieldIsEmpty ? "" : context else {
+            if automaticShift { shift = .off; automaticShift = false }
+            return
+        }
         let needed = autoCapitalization && SentenceCapitalization.shouldCapitalize(contextBeforeInput: context)
         if needed && shift == .off { shift = .once; automaticShift = true }
         else if !needed && automaticShift { shift = .off; automaticShift = false }
