@@ -16,7 +16,7 @@ extension KeyboardLanguage {
         for (row, keys) in rows.enumerated() {
             if let column = keys.firstIndex(of: base) {
                 let symbol = punctuation[row][column]
-                if symbol == "$" { return ["€", "₽", "₴"] }
+                if symbol == "$" { return ["$", "€", "₽", "₴"] }
                 return [symbol] + variants.filter { $0 != symbol }
             }
         }

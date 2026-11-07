@@ -656,7 +656,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 let button = makeButton(key)
                 button.accessibilityLabel = key
                 configureTextAction(button, text: key)
-                let alternatives = state.emoji ? [] : (state.symbols ? (key == "$" ? ["€", "₽", "₴"] : state.language.alternatives(for: key)) : state.language.holdAlternatives(for: key, symbolsEnabled: settings.extraSymbols))
+                let alternatives = state.emoji ? [] : (state.symbols ? state.symbolPage.holdAlternatives(for: key) : state.language.holdAlternatives(for: key, symbolsEnabled: settings.extraSymbols))
                 configureHold(on: button, alternatives: alternatives)
                 letterButtons.append((button, key)); attach(button)
             }
@@ -2048,7 +2048,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         case .began:
             hideKeyPreview(); stopDeleting()
             let base = button.title(for: .normal)?.lowercased() ?? ""
-            let alternatives = state.symbols ? state.language.alternatives(for: base) : state.language.holdAlternatives(for: base, symbolsEnabled: settings.extraSymbols)
+            let alternatives = state.symbols ? state.symbolPage.holdAlternatives(for: base) : state.language.holdAlternatives(for: base, symbolsEnabled: settings.extraSymbols)
             let rect = button.convert(button.bounds, to: view)
             let opensLeft = rect.midX > view.bounds.midX
             let choices = alternatives + [base]

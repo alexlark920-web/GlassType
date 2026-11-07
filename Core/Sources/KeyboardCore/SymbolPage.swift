@@ -16,4 +16,12 @@ public enum SymbolPage: CaseIterable, Equatable {
                     ["•", "√", "π", "÷", "×", "°"]]
         }
     }
+
+    public func holdAlternatives(for key: String) -> [String] {
+        let powers = ["0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+                      "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹"]
+        if let power = powers[key] { return [power] }
+        if key == "$" { return ["€", "₽", "₴"] }
+        return []
+    }
 }

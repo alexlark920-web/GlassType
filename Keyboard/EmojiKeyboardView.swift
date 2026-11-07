@@ -25,6 +25,7 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
     private var selectedSection: Int?
     private var lastSize: CGSize = .zero
     private var backspaceHandler: EmojiBackspaceHandler?
+    private var variantPopover: UIView?
 
     private var visibleItems: [EmojiItem] {
         let source: [EmojiItem]
@@ -238,8 +239,67 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: EmojiItemCell.reuseIdentifier, for: indexPath) as! EmojiItemCell
         let item = visibleItems[indexPath.item]
+        cell.onLongPress = { [weak self, weak cell] in
+            guard let self, let cell else { return }
+            self.showVariantPopover(for: item, from: cell)
+        }
         cell.configure(item, color: theme.foreground)
         return cell
+    }
+
+    private func showVariantPopover(for item: EmojiItem, from cell: UICollectionViewCell) {
+        let choices = EmojiVariants.choices(for: item.emoji, among: allItems)
+        guard choices.count > 1 else { return }
+        variantPopover?.removeFromSuperview()
+        let panel = UIView(); panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.backgroundColor = theme.key.withAlphaComponent(0.97)
+        panel.layer.cornerRadius = 16; panel.layer.cornerCurve = .continuous
+        panel.layer.borderWidth = 0.7; panel.layer.borderColor = UIColor.white.withAlphaComponent(0.22).cgColor
+        panel.layer.shadowColor = UIColor.black.cgColor; panel.layer.shadowOpacity = 0.3; panel.layer.shadowRadius = 12
+        let title = UILabel(); title.text = item.name.capitalized; title.textColor = theme.foreground
+        title.font = .systemFont(ofSize: 13, weight: .semibold); title.translatesAutoresizingMaskIntoConstraints = false
+        let scroll = UIScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.showsHorizontalScrollIndicator = false; scroll.alwaysBounceHorizontal = true
+        let stack = UIStackView(); stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .horizontal; stack.spacing = 5; stack.alignment = .center
+        scroll.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -8),
+            stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            stack.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor)
+        ])
+        for choice in choices {
+            let button = UIButton(type: .system); button.setTitle(choice.emoji, for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 26); button.setTitleColor(theme.foreground, for: .normal)
+            button.backgroundColor = UIColor.white.withAlphaComponent(0.12); button.layer.cornerRadius = 10
+            button.widthAnchor.constraint(equalToConstant: 44).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            button.accessibilityLabel = choice.name
+            button.addAction(UIAction { [weak self] _ in
+                var defaults = UserDefaults.standard.dictionary(forKey: "GlassType.emojiToneDefaults") as? [String: String] ?? [:]
+                defaults[EmojiVariants.base(of: choice.emoji)] = choice.emoji
+                UserDefaults.standard.set(defaults, forKey: "GlassType.emojiToneDefaults")
+                self?.variantPopover?.removeFromSuperview(); self?.variantPopover = nil
+                self?.grid.reloadData(); self?.onSelectEmoji?(choice.emoji)
+            }, for: .touchUpInside)
+            stack.addArrangedSubview(button)
+        }
+        panel.addSubview(title); panel.addSubview(scroll); addSubview(panel); variantPopover = panel
+        let center = cell.convert(CGPoint(x: cell.bounds.midX, y: cell.bounds.midY), to: self)
+        let panelWidth = min(bounds.width - 16, max(196, CGFloat(choices.count) * 49 + 16))
+        let left = min(max(8, center.x - panelWidth / 2), bounds.width - panelWidth - 8)
+        let top = max(4, center.y - 78)
+        NSLayoutConstraint.activate([
+            panel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: left),
+            panel.topAnchor.constraint(equalTo: topAnchor, constant: top), panel.widthAnchor.constraint(equalToConstant: panelWidth),
+            panel.heightAnchor.constraint(equalToConstant: 82),
+            title.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 10), title.topAnchor.constraint(equalTo: panel.topAnchor, constant: 6),
+            scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 2), scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -2),
+            scroll.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 2), scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -4)
+        ])
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -254,19 +314,7 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
         if EmojiVariants.base(of: item.emoji) == "🤝" {
             return handshakeConfiguration(item: item)
         }
-        let choices = EmojiVariants.choices(for: item.emoji, among: allItems)
-        guard choices.count > 1 else { return nil }
-        return UIContextMenuConfiguration(identifier: item.emoji as NSString, previewProvider: nil) { [weak self] _ in
-            UIMenu(title: item.name, children: choices.map { choice in
-                UIAction(title: choice.emoji) { [weak self] _ in
-                    var defaults = UserDefaults.standard.dictionary(forKey: "GlassType.emojiToneDefaults") as? [String: String] ?? [:]
-                    defaults[EmojiVariants.base(of: choice.emoji)] = choice.emoji
-                    UserDefaults.standard.set(defaults, forKey: "GlassType.emojiToneDefaults")
-                    self?.grid.reloadData()
-                    self?.onSelectEmoji?(choice.emoji)
-                }
-            })
-        }
+        return nil
     }
 
     private func handshakeConfiguration(item: EmojiItem) -> UIContextMenuConfiguration {
@@ -298,7 +346,7 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
             })
         }
         return UIContextMenuConfiguration(identifier: item.emoji as NSString, previewProvider: nil) { _ in
-            UIMenu(title: item.name, children: [toneMenu("Left hand", choosingLeft: true), toneMenu("Right hand", choosingLeft: false)])
+            UIMenu(title: item.name.capitalized, children: [toneMenu("Left hand", choosingLeft: true), toneMenu("Right hand", choosingLeft: false)])
         }
     }
 
@@ -318,6 +366,7 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
 
 private final class EmojiItemCell: UICollectionViewCell {
     static let reuseIdentifier = "EmojiItemCell"
+    var onLongPress: (() -> Void)?
     private let label = UILabel()
 
     override init(frame: CGRect) {
@@ -328,6 +377,9 @@ private final class EmojiItemCell: UICollectionViewCell {
         label.adjustsFontSizeToFitWidth = true
         label.minimumScaleFactor = 0.72
         contentView.addSubview(label)
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
+        hold.minimumPressDuration = 0.35
+        contentView.addGestureRecognizer(hold)
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
@@ -338,6 +390,10 @@ private final class EmojiItemCell: UICollectionViewCell {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @objc private func held(_ gesture: UILongPressGestureRecognizer) {
+        if gesture.state == .began { onLongPress?() }
+    }
 
     override var isHighlighted: Bool {
         didSet {

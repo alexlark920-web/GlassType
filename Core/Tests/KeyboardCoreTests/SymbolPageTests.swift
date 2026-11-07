@@ -41,4 +41,11 @@ final class SymbolPageTests: XCTestCase {
         XCTAssertEqual(state.inserted("a"), "A")
     }
 
+    func testDigitKeysOfferSuperscriptOnLongPress() {
+        for (digit, power) in zip("0123456789", ["⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"]) {
+            XCTAssertEqual(SymbolPage.numbers.holdAlternatives(for: String(digit)), [power])
+        }
+        XCTAssertTrue(SymbolPage.numbers.holdAlternatives(for: "+").isEmpty)
+    }
+
 }

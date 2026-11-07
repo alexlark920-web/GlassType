@@ -23,7 +23,7 @@ final class AlternateSymbolsTests: XCTestCase {
     func testLocaleCurrency() {
         for language in KeyboardLanguage.allCases {
             let key = language.rows[1][2]
-            XCTAssertEqual(language.holdAlternatives(for: key, symbolsEnabled: true), ["€", "₽", "₴"])
+            XCTAssertEqual(language.holdAlternatives(for: key, symbolsEnabled: true), ["$", "€", "₽", "₴"])
         }
     }
     func testCurrencyKeysAndHoldVariants() {
