@@ -8,8 +8,12 @@ final class PredictionEngineTests: XCTestCase {
         let result = PredictionEngine().predict(context: "say he", language: .english,
                                                 personalLexicon: lexicon)
         XCTAssertEqual(result.prefix, "he")
-        XCTAssertTrue(result.words.contains("heythere"))
-        XCTAssertTrue(result.words.contains("hello"))
+        XCTAssertEqual(result.words.first, "heythere")
+        XCTAssertEqual(result.words.count, 3)
+        let generated = CandidateGenerator().candidates(prefix: "he", language: .english,
+                                                         personalLexicon: lexicon, limit: 18)
+        XCTAssertTrue(generated.contains("heythere"))
+        XCTAssertTrue(generated.contains("hello"))
     }
 
     func testNextWordPredictionLearnsOnlyAggregatePerLanguageTransitions() throws {

@@ -32,7 +32,7 @@ public struct PersonalNGramModel: Codable, Equatable {
             }
             counts[key] = row
         }
-        if counts.count > Self.maximumContexts {
+        while counts.count > Self.maximumContexts {
             let least = counts.keys.min {
                 let left = counts[$0]?.values.reduce(0, +) ?? 0
                 let right = counts[$1]?.values.reduce(0, +) ?? 0

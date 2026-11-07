@@ -65,8 +65,11 @@ final class AutocorrectionTests: XCTestCase {
         for _ in 0..<8 { model.observe(context: "say", nextWord: "hello", language: .english) }
         XCTAssertEqual(engine.rankedReplacement(for: "hellp", language: .english, candidates: candidates,
                                                  languageModel: model, previousContext: "say"), "hello")
-        XCTAssertEqual(engine.rankedReplacement(for: "hellp", language: .russian, candidates: candidates,
-                                                 languageModel: model, previousContext: "say"), "help")
+        let russianCandidates = [AutocorrectionEngine.Candidate("миром", frequencyRank: 1),
+                                 AutocorrectionEngine.Candidate("мирой", frequencyRank: 10_000)]
+        XCTAssertEqual(engine.rankedReplacement(for: "мирок", language: .russian, candidates: russianCandidates), "миром")
+        XCTAssertEqual(engine.rankedReplacement(for: "мирок", language: .russian, candidates: russianCandidates,
+                                                 languageModel: model, previousContext: "say"), "миром")
     }
     func testRankedCorrectionUsesActualOfflineCorporaForAllLanguages() {
         for (typo, expected, language) in [("keybaord", "keyboard", KeyboardLanguage.english),

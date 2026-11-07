@@ -33,10 +33,14 @@ public struct PredictionEngine {
                                               includeProfanity: includeProfanity,
                                               limit: max(limit * 6, 18))
         let previousContext = String(context.dropLast(prefix.count))
+        let personalCandidates = Set(personalLexicon.completions(for: prefix, limit: 8).map { $0.lowercased() })
         let ranked = candidates.enumerated().sorted { left, right in
             let leftScore = model.score(left.element, after: previousContext, language: language)
             let rightScore = model.score(right.element, after: previousContext, language: language)
             if abs(leftScore - rightScore) > 0.000_001 { return leftScore > rightScore }
+            let leftIsPersonal = personalCandidates.contains(left.element.lowercased())
+            let rightIsPersonal = personalCandidates.contains(right.element.lowercased())
+            if leftIsPersonal != rightIsPersonal { return leftIsPersonal }
             let leftRank = OfflineLexicon.frequencyIndex(word: left.element, language: language) ?? Int.max
             let rightRank = OfflineLexicon.frequencyIndex(word: right.element, language: language) ?? Int.max
             return leftRank == rightRank ? left.offset < right.offset : leftRank < rightRank
