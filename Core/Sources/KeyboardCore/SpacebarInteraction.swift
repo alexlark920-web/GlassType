@@ -17,7 +17,7 @@ public struct SpacebarInteraction {
     public static let swipeDistance = 36.0
     public static let cursorStep = 8.0
     private var startX = 0.0, startY = 0.0, startTime = 0.0
-    private var lastX = 0.0, lastY = 0.0, cursorAnchor = 0.0
+    private var lastX = 0.0, lastY = 0.0, cursorAppliedSteps = 0
     private var holdEligible = true
     public init() {}
 
@@ -32,13 +32,17 @@ public struct SpacebarInteraction {
         guard x.isFinite, y.isFinite, time.isFinite else { cancel(); return .none }
         lastX = x; lastY = y
         if phase == .cursor {
-            let distance = x - cursorAnchor
+            // Map the pointer's absolute offset from the hold origin to a
+            // target caret offset. Applying acceleration to the remaining
+            // distance after each event causes stationary fingers to creep.
+            let distance = x - startX
             let magnitude = abs(distance)
             let acceleration = min(5.0, 1.0 + max(0, magnitude - 24.0) / 40.0)
             let offset = distance / Self.cursorStep * acceleration
-            let steps = Int(min(48, max(-48, offset)))
+            let targetSteps = Int(min(48, max(-48, offset)))
+            let steps = targetSteps - cursorAppliedSteps
             guard steps != 0 else { return .none }
-            cursorAnchor += Double(steps) * Self.cursorStep
+            cursorAppliedSteps = targetSteps
             return .moveCursor(steps)
         }
         guard phase == .pressing else { return .none }
@@ -64,14 +68,13 @@ public struct SpacebarInteraction {
         else if lastX > buttonWidth { direction = 1; distance = lastX - buttonWidth }
         else { return .none }
         let steps = min(8, max(1, 1 + Int(distance / 48)))
-        cursorAnchor = lastX
         return .moveCursor(Int(direction) * steps)
     }
     /// Called by the UI's hold timer as well as touch updates.
     public mutating func hold(at time: Double) -> Action {
         guard phase == .pressing, holdEligible, time.isFinite,
               time - startTime >= Self.holdDuration else { return .none }
-        phase = .cursor; cursorAnchor = lastX
+        phase = .cursor; cursorAppliedSteps = 0
         return .cursorBegan
     }
     public mutating func end(x: Double, y: Double, at time: Double) -> Action {
@@ -95,6 +98,6 @@ public struct SpacebarInteraction {
     public mutating func cancel() { reset() }
     private mutating func reset() {
         phase = .idle; holdEligible = true
-        startX = 0; startY = 0; startTime = 0; lastX = 0; lastY = 0; cursorAnchor = 0
+        startX = 0; startY = 0; startTime = 0; lastX = 0; lastY = 0; cursorAppliedSteps = 0
     }
 }
