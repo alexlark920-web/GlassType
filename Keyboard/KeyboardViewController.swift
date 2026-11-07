@@ -1176,16 +1176,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             append(container, to: group)
         }
 
-        let locale = card("Язык интерфейса")
-        let localeControl = UISegmentedControl(items: InterfaceLanguage.allCases.map(\.shortTitle))
-        localeControl.selectedSegmentIndex = InterfaceLanguage.allCases.firstIndex(of: settings.interfaceLanguage) ?? 0
-        localeControl.addAction(UIAction { [weak self, weak localeControl] _ in
-            guard let self, let localeControl, InterfaceLanguage.allCases.indices.contains(localeControl.selectedSegmentIndex) else { return }
-            self.settings.interfaceLanguage = InterfaceLanguage.allCases[localeControl.selectedSegmentIndex]
-            self.settings.saveKeyboardOverrides()
-        }, for: .valueChanged)
-        segmented("Язык интерфейса", control: localeControl, group: locale)
-
         let typing = card("Ввод")
         toggle("Автозамена", value: settings.autoCorrection, group: typing) { [weak self] value in
             self?.settings.autoCorrection = value; self?.settings.saveKeyboardOverrides()
@@ -1303,6 +1293,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             }
         }
         updateLanguageSwitches()
+
+        let locale = card("Язык интерфейса")
+        let localeControl = UISegmentedControl(items: InterfaceLanguage.allCases.map(\.shortTitle))
+        localeControl.selectedSegmentIndex = InterfaceLanguage.allCases.firstIndex(of: settings.interfaceLanguage) ?? 0
+        localeControl.addAction(UIAction { [weak self, weak localeControl] _ in
+            guard let self, let localeControl, InterfaceLanguage.allCases.indices.contains(localeControl.selectedSegmentIndex) else { return }
+            self.settings.interfaceLanguage = InterfaceLanguage.allCases[localeControl.selectedSegmentIndex]
+            self.settings.saveKeyboardOverrides()
+        }, for: .valueChanged)
+        segmented("Язык интерфейса", control: localeControl, group: locale)
 
         rows.isHidden = true; settingsPanel = panel
         UIAccessibility.post(notification: .screenChanged, argument: done)

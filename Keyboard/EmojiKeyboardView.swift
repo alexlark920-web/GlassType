@@ -1,5 +1,6 @@
 import UIKit
 import KeyboardCore
+import CoreText
 
 /// Emoji picker with an iOS-style search entry, horizontal catalogue browsing,
 /// category shortcuts, and the standard keyboard controls along the bottom.
@@ -31,7 +32,12 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
             source = catalog.sections[selectedSection].entries
         } else { source = allItems }
         let defaults = UserDefaults.standard.dictionary(forKey: "GlassType.emojiToneDefaults") as? [String: String] ?? [:]
-        return EmojiVariants.collapsed(source, preferred: defaults)
+        return EmojiVariants.collapsed(source.filter { item in
+            let base = CTFontCreateWithName("AppleColorEmoji" as CFString, 24, nil)
+            let fallback = CTFontCreateForString(base, item.emoji as CFString,
+                                                 CFRange(location: 0, length: (item.emoji as NSString).length))
+            return !String(describing: CTFontCopyPostScriptName(fallback)).localizedCaseInsensitiveContains("LastResort")
+        }, preferred: defaults)
     }
 
     init(catalog: EmojiCatalog, theme: KeyboardTheme, interfaceLanguage: InterfaceLanguage,

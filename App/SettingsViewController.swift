@@ -36,7 +36,7 @@ final class SettingsViewController: UITableViewController {
             cell.accessoryType = .disclosureIndicator
         }
         if indexPath.section == 1 {
-            let labels = ["Тема", "Подсказки", "Заглавная в начале предложения", "Виброотклик", "Символы удержанием", "Метки на клавишах", "Задержка удержания", "Автозамена", "Компактные клавиши", "Отображение символа при нажатии", "Двойной пробел → точка", "Свайп удаления слова", "Свайп-ввод слов", "Адаптация касаний", "Показать зоны касаний", "Лицензии словарей", "Язык интерфейса", "Заменить глобус на эмодзи"]
+            let labels = ["Тема", "Подсказки", "Заглавная в начале предложения", "Виброотклик", "Символы удержанием", "Метки на клавишах", "Задержка удержания", "Автозамена", "Компактные клавиши", "Отображение символа при нажатии", "Двойной пробел → точка", "Свайп удаления слова", "Свайп-ввод слов", "Адаптация касаний", "Показать зоны касаний", "Лицензии словарей", "Заменить глобус на эмодзи", "Язык интерфейса"]
             guard labels.indices.contains(indexPath.row) else { return cell }
             cell.textLabel?.text = t(labels[indexPath.row])
             cell.textLabel?.numberOfLines = (indexPath.row == 2 || indexPath.row >= 9) ? 2 : 1
@@ -58,7 +58,7 @@ final class SettingsViewController: UITableViewController {
                 control.selectedSegmentIndex = settings.holdDelay < 0.325 ? 0 : (settings.holdDelay < 0.5 ? 1 : 2)
                 control.addTarget(self, action: #selector(delayChanged(_:)), for: .valueChanged)
                 cell.accessoryView = control
-            case 16:
+            case 17:
                 let control = UISegmentedControl(items: InterfaceLanguage.allCases.map(\.shortTitle))
                 control.selectedSegmentIndex = InterfaceLanguage.allCases.firstIndex(of: settings.interfaceLanguage) ?? 0
                 control.accessibilityLabel = t("Язык интерфейса")
@@ -78,7 +78,7 @@ final class SettingsViewController: UITableViewController {
                 case 12: control.isOn = settings.glideTyping
                 case 13: control.isOn = settings.touchAdaptationEnabled
                 case 14: control.isOn = settings.debugTouchZones
-                case 17: control.isOn = settings.emojiKeyEnabled
+                case 16: control.isOn = settings.emojiKeyEnabled
                 default: control.isOn = settings.symbolHints
                 }
                 control.addTarget(self, action: #selector(toggle(_:)), for: .valueChanged)
@@ -141,7 +141,7 @@ final class SettingsViewController: UITableViewController {
         case 12: settings.glideTyping = control.isOn
         case 13: settings.touchAdaptationEnabled = control.isOn
         case 14: settings.debugTouchZones = control.isOn
-        case 17: settings.emojiKeyEnabled = control.isOn
+        case 16: settings.emojiKeyEnabled = control.isOn
         default: settings.symbolHints = control.isOn
         }
         settings.save()
