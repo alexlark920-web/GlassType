@@ -45,4 +45,6 @@ python3 Scripts/validate_project.py
 
 ## Текущие результаты
 
-В Linux доступна только структурная проверка `validate_project.py`. XCTest, сборка, подпись, IPA-установка и перечисленные проверки на устройстве здесь не выполнялись. Их результаты нельзя считать успешными до реального запуска.
+GitHub Actions [#20](https://github.com/alexlark920-web/GlassType/actions/runs/42356253976) для GlassType 1.9 (17) прошёл: XCTest `KeyboardCore`, сборка для generic iOS Simulator и unsigned device archive/IPA завершились успешно. Workflow создал артефакты IPA и `GlassType-source-v1.9-build17`.
+
+В текущей Linux-среде `python3 Scripts/validate_project.py` проходит структурную проверку. `bash Scripts/check-macos.sh` сообщает об отсутствии macOS/Xcode/Swift/iOS Simulator SDK; локальные XCTest и Xcode в этой среде не запускались. Установка IPA через SideStore, ручные сценарии на iPhone 15 Pro, подпись и проверка поведения на устройстве остаются невыполненными.

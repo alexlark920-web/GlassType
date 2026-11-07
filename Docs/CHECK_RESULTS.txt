@@ -1,4 +1,10 @@
-GlassType 1.8 (16) — проверка ожидается.
-Локально: структурная проверка проекта пройдена; Xcode/Swift в этой среде отсутствуют.
-Новая проверка XCTest, simulator build и device archive будет выполнена в GitHub Actions.
-Последняя подтверждённая версия 1.7 (15): https://github.com/alexlark920-web/GlassType/actions/runs/42338499265
+GlassType 1.9 (17) — GitHub Actions #20 завершился успешно:
+https://github.com/alexlark920-web/GlassType/actions/runs/42356253976
+
+Прошли XCTest пакета KeyboardCore, сборка generic iOS Simulator и unsigned device archive/IPA.
+Созданы артефакты GlassType-unsigned-IPA (4,307,398 bytes) и
+GlassType-source-v1.9-build17 (2,267,174 bytes).
+
+В локальной Linux-среде структурная проверка `python3 Scripts/validate_project.py` прошла;
+`bash Scripts/check-macos.sh` не запускает тесты без macOS/Xcode/Swift/iOS SDK.
+Установка через SideStore и ручная проверка на iPhone 15 Pro не выполнялись.
