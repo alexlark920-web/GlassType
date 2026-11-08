@@ -6,9 +6,9 @@ import CoreGraphics
 public struct BackspaceEngine: Sendable {
     public enum Deletion: Equatable, Sendable { case character, word }
 
-    /// The first character is deleted on touch-down; start repeating almost
-    /// immediately so a held key does not appear to pause after that deletion.
-    public static let initialDelay: TimeInterval = 0.05
+    /// Delete one character on touch-down. Start repeats after a brief hold,
+    /// then use the elapsed hold duration to accelerate them.
+    public static let initialDelay: TimeInterval = 0.3
     public static let repeatInterval: TimeInterval = 0.05
     public static let acceleratedInterval: TimeInterval = 0.03
     public static let wordInterval: TimeInterval = 0.2
@@ -19,8 +19,8 @@ public struct BackspaceEngine: Sendable {
 
     public init() {}
 
-    /// The first character is removed on touch-down; held presses repeat after
-    /// a short 50 ms interval.
+    /// The first character is removed on touch-down; held presses start
+    /// repeating after 300 ms.
     public func nextDeletion(heldFor elapsed: TimeInterval) -> Deletion {
         elapsed.isFinite && elapsed >= Self.wordDeletionAfter ? .word : .character
     }
