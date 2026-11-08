@@ -29,18 +29,21 @@ final class KeyPreviewLayoutTests: XCTestCase {
         let layout = try XCTUnwrap(KeyPreviewLayout.make(keyFrame: key, availableBounds: bounds))
         XCTAssertTrue(bounds.contains(layout.frame))
     }
-    func testRussianEdgeLetterKeysReceiveTheSameClampedPreview() throws {
+    func testEdgeLetterKeysReceiveTheSameClampedPreviewAcrossLanguages() throws {
         let bounds = CGRect(x: 0, y: 0, width: 393, height: 254)
-        let geometry = KeyboardGeometry.make(bounds: bounds, language: .russian)
-        let edgeLetters = [0, 2].flatMap { row in
-            let rowLetters = geometry.keys.filter { $0.row == row && $0.role.character != nil }
-            return [rowLetters.first, rowLetters.last].compactMap { $0 }
-        }
-        XCTAssertEqual(edgeLetters.compactMap(\.role.character), ["й", "ъ", "я", "ю"])
-        for key in edgeLetters {
-            let preview = try XCTUnwrap(KeyPreviewLayout.make(keyFrame: key.visualFrame, availableBounds: bounds), key.role.character!)
-            XCTAssertTrue(bounds.contains(preview.frame), key.role.character!)
-            XCTAssertGreaterThan(preview.stemWidth, 0, key.role.character!)
+        for language in KeyboardLanguage.allCases {
+            let geometry = KeyboardGeometry.make(bounds: bounds, language: language)
+            let edgeLetters = [0, 2].flatMap { row in
+                let rowLetters = geometry.keys.filter { $0.row == row && $0.role.character != nil }
+                return [rowLetters.first, rowLetters.last].compactMap { $0 }
+            }
+            XCTAssertEqual(edgeLetters.count, 4, language.rawValue)
+            for key in edgeLetters {
+                let character = key.role.character ?? "?"
+                let preview = try XCTUnwrap(KeyPreviewLayout.make(keyFrame: key.visualFrame, availableBounds: bounds), "\(language.rawValue): \(character)")
+                XCTAssertTrue(bounds.contains(preview.frame), "\(language.rawValue): \(character)")
+                XCTAssertGreaterThan(preview.stemWidth, 0, "\(language.rawValue): \(character)")
+            }
         }
     }
     func testInvalidOrOffscreenGeometryIsIgnored() {
