@@ -1,6 +1,6 @@
 import Foundation
 
-public enum KeyboardLanguage: String, CaseIterable, Codable {
+public enum KeyboardLanguage: String, CaseIterable, Codable, Sendable {
     case english = "en", russian = "ru", ukrainian = "uk"
     public var title: String { switch self { case .english: return "English"; case .russian: return "Русский"; case .ukrainian: return "Українська" } }
     public var rows: [[String]] {

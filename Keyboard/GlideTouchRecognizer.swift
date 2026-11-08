@@ -8,6 +8,7 @@ final class GlideTouchRecognizer: UIGestureRecognizer {
     private(set) var points: [CGPoint] = []
     private(set) var startPoint: CGPoint = .zero
     private weak var trackedTouch: UITouch?
+    private var pointThrottler = GlidePointThrottler()
 
     override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
@@ -20,14 +21,16 @@ final class GlideTouchRecognizer: UIGestureRecognizer {
         }
         trackedTouch = touch
         startPoint = touch.location(in: coordinateView ?? view)
+        pointThrottler.reset()
         points = [startPoint]
+        _ = pointThrottler.shouldAccept(startPoint, at: touch.timestamp)
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
         guard let touch = trackedTouch, touches.contains(touch), state != .failed, state != .cancelled else { return }
         var activates = false
         for sample in event.coalescedTouches(for: touch) ?? [touch] {
             let point = sample.location(in: coordinateView ?? view)
-            append(point)
+            append(point, at: sample.timestamp)
             if state == .possible, mayBegin?(startPoint, point) == true { activates = true }
         }
         if state == .possible {
@@ -37,22 +40,24 @@ final class GlideTouchRecognizer: UIGestureRecognizer {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
         guard let touch = trackedTouch, touches.contains(touch), state != .failed, state != .cancelled else { return }
-        append(touch.location(in: coordinateView ?? view))
+        append(touch.location(in: coordinateView ?? view), at: touch.timestamp, force: true)
         state = state == .possible ? .failed : .ended
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
         state = state == .possible ? .failed : .cancelled
     }
     override func reset() {
-        super.reset(); trackedTouch = nil; points.removeAll(keepingCapacity: true); startPoint = .zero
+        super.reset(); trackedTouch = nil; points.removeAll(keepingCapacity: true); startPoint = .zero; pointThrottler.reset()
     }
     func cancelCurrentTouch() {
         if state == .possible { state = .failed }
         else if state == .began || state == .changed { state = .cancelled }
     }
-    private func append(_ point: CGPoint) {
+    private func append(_ point: CGPoint, at timestamp: TimeInterval, force: Bool = false) {
         guard point.x.isFinite, point.y.isFinite else { return }
         if let last = points.last, hypot(point.x - last.x, point.y - last.y) < 1 { return }
+        guard force || pointThrottler.shouldAccept(point, at: timestamp) else { return }
+        if force { _ = pointThrottler.shouldAccept(point, at: timestamp) }
         if points.count >= 384 { points = points.enumerated().filter { $0.offset % 2 == 0 }.map(\.element) }
         points.append(point)
     }
