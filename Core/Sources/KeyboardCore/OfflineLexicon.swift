@@ -39,12 +39,13 @@ public enum OfflineLexicon {
         func ranks(for words: [String]) -> [String: Int] {
             guard let orderedWordData, !words.isEmpty else { return [:] }
             rankLock.lock()
-            var result = Dictionary(uniqueKeysWithValues: words.compactMap { source -> (String, Int)? in
-                let word = normalized(source)
-                return rankCache[word].map { (word, $0) }
-            })
+            var result: [String: Int] = [:]
+            for source in words {
+                let word = OfflineLexicon.normalized(source)
+                if let rank = rankCache[word] { result[word] = rank }
+            }
             rankLock.unlock()
-            let missing = words.map(normalized).filter { result[$0] == nil }
+            let missing = words.map(OfflineLexicon.normalized).filter { result[$0] == nil }
             var targets: [UInt64: [(String, [UInt8])]] = [:]
             for word in missing {
                 let bytes = Array(word.utf8)
@@ -75,8 +76,8 @@ public enum OfflineLexicon {
                 }
             }
             let extras = SupplementalVocabulary.words(for: language)
-            for (index, word) in extras.enumerated() where result[normalized(word)] == nil {
-                result[normalized(word)] = (orderedWordData.count == 0 ? 0 : orderedWordData.splitLinesCount) + index
+            for (index, word) in extras.enumerated() where result[OfflineLexicon.normalized(word)] == nil {
+                result[OfflineLexicon.normalized(word)] = (orderedWordData.count == 0 ? 0 : orderedWordData.splitLinesCount) + index
             }
             rankLock.lock()
             if rankCache.count + result.count > 1_024 { rankCache.removeAll(keepingCapacity: true) }
@@ -87,11 +88,11 @@ public enum OfflineLexicon {
 
         func completions(prefix: String, limit: Int, includeProfanity: Bool) -> [String] {
             guard limit > 0, let trie else { return [] }
-            let key = normalized(prefix)
+            let key = OfflineLexicon.normalized(prefix)
             var result: [String] = []
             if key.count >= 3 {
                 result = SupplementalVocabulary.words(for: language).filter {
-                    normalized($0).hasPrefix(key) && normalized($0) != key &&
+                    OfflineLexicon.normalized($0).hasPrefix(key) && OfflineLexicon.normalized($0) != key &&
                         (includeProfanity || !SupplementalVocabulary.isProfanity($0, language: language))
                 }
                 if result.count >= limit { return Array(result.prefix(limit)) }
@@ -99,7 +100,7 @@ public enum OfflineLexicon {
             guard trie.findWords(matchingPrefix: key, limit: 1).isEmpty == false else { return result }
             guard let orderedWordData else {
                 let mapped = trie.findWords(matchingPrefix: key, limit: limit + 1)
-                return (result + mapped.filter { normalized($0) != key }).prefix(limit).map { $0 }
+                return (result + mapped.filter { OfflineLexicon.normalized($0) != key }).prefix(limit).map { $0 }
             }
             let prefixBytes = Array(key.utf8)
             var foundRanks: [String: Int] = [:]
@@ -117,12 +118,12 @@ public enum OfflineLexicon {
                            UnsafeBufferPointer(start: bytes + start, count: buffer.count).starts(with: buffer)
                        }) {
                         let word = String(decoding: UnsafeBufferPointer(start: bytes + start, count: wordEnd - start), as: UTF8.self)
-                        if normalized(word) != key,
+                        if OfflineLexicon.normalized(word) != key,
                            (includeProfanity || !SupplementalVocabulary.isProfanity(word, language: language)),
-                           !result.contains(where: { normalized($0) == normalized(word) }),
+                           !result.contains(where: { OfflineLexicon.normalized($0) == OfflineLexicon.normalized(word) }),
                            trie.contains(word) {
                             result.append(word)
-                            foundRanks[normalized(word)] = rank
+                            foundRanks[OfflineLexicon.normalized(word)] = rank
                             if result.count >= limit { break }
                         }
                     }

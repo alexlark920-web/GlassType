@@ -118,6 +118,6 @@ public final class MappedBinaryLexicon: @unchecked Sendable {
         UInt32(bytes[offset]) | UInt32(bytes[offset + 1]) << 8 | UInt32(bytes[offset + 2]) << 16 | UInt32(bytes[offset + 3]) << 24
     }
     private static func validOffset(_ offset: UInt32, count: Int) -> Bool {
-        offset >= UInt32(nodeSize) && offset < count && offset % UInt32(nodeSize) == 0
+        offset >= UInt32(nodeSize) && Int(offset) < count && offset % UInt32(nodeSize) == 0
     }
 }
