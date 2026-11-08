@@ -37,6 +37,9 @@ private class KeyButton: UIButton {
     private let sheen = CAGradientLayer()
     private var glass: UIVisualEffectView?
     private var trackpadAppearance = false
+    private var pressFeedbackActive = false
+    private var pressFeedbackBeganAt: CFTimeInterval = 0
+    private var pressFeedbackRelease: DispatchWorkItem?
     var routedHighlight = false { didSet { updatePressAppearance(animated: true) } }
     var showsCharacterPreview = false
     weak var touchSurface: KeyboardTouchSurface?
@@ -167,9 +170,9 @@ private class KeyButton: UIButton {
         let lifts = pressBehavior == .character
         let pressedAlpha: CGFloat
         switch pressBehavior {
-        case .character: pressedAlpha = dark ? 0.14 : 0.20
-        case .function: pressedAlpha = dark ? 0.085 : 0.14
-        case .spacebar: pressedAlpha = dark ? 0.065 : 0.17
+        case .character: pressedAlpha = dark ? 0.18 : 0.23
+        case .function: pressedAlpha = dark ? 0.12 : 0.17
+        case .spacebar: pressedAlpha = dark ? 0.10 : 0.18
         }
         let changes = {
             self.face.alpha = self.trackpadAppearance ? 0.30 : 1
@@ -181,14 +184,35 @@ private class KeyButton: UIButton {
                 child.alpha = self.trackpadAppearance ? 0 : 1
             }
         }
-        pressShade.layer.removeAllAnimations()
-        if down { pressShade.alpha = pressedAlpha }
-        else if animated && !reducedMotion {
-            UIView.animate(withDuration: 0.12, delay: 0,
-                           options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
-                self.pressShade.alpha = 0
+        if trackpadAppearance {
+            pressFeedbackRelease?.cancel(); pressFeedbackRelease = nil
+            pressFeedbackActive = false; pressFeedbackBeganAt = 0
+            pressShade.layer.removeAllAnimations(); pressShade.alpha = 0
+        } else if down {
+            pressFeedbackRelease?.cancel(); pressFeedbackRelease = nil
+            pressShade.layer.removeAllAnimations()
+            if !pressFeedbackActive { pressFeedbackBeganAt = CACurrentMediaTime() }
+            pressFeedbackActive = true
+            pressShade.alpha = pressedAlpha
+        } else if pressFeedbackActive {
+            pressFeedbackActive = false
+            let remaining = max(0, 0.075 - (CACurrentMediaTime() - pressFeedbackBeganAt))
+            pressFeedbackRelease?.cancel()
+            let release = DispatchWorkItem { [weak self] in
+                guard let self, !self.pressFeedbackActive else { return }
+                self.pressShade.layer.removeAllAnimations()
+                UIView.animate(withDuration: 0.12, delay: 0,
+                               options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
+                    self.pressShade.alpha = 0
+                }
+                self.pressFeedbackRelease = nil
             }
-        } else { pressShade.alpha = 0 }
+            pressFeedbackRelease = release
+            if remaining > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: release) }
+            else { release.perform() }
+        } else if !down {
+            pressShade.layer.removeAllAnimations(); pressShade.alpha = 0
+        }
         if !animated || reducedMotion { changes() }
         else if !lifts {
             UIView.animate(withDuration: 0.06, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut], animations: changes)
@@ -489,7 +513,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var glideUndo: CorrectionUndo?
     private var completedWord: CompletedWordInsertion?
     private var glideSnapshot: (InputContextSnapshot, KeyboardLanguage)?
-    private let glideTrail = CAShapeLayer()
+    private let glideTrailSegments: [CAShapeLayer] = (0..<47).map { _ in
+        let layer = CAShapeLayer()
+        layer.fillColor = nil; layer.lineCap = .round; layer.lineJoin = .round
+        layer.isHidden = true
+        return layer
+    }
     private lazy var glidePan: GlideTouchRecognizer = {
         let pan = GlideTouchRecognizer(target: self, action: #selector(glideChanged(_:)))
         pan.delegate = self; pan.coordinateView = view
@@ -543,8 +572,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             guard let key = button as? KeyButton else { return }
             self?.finishKeyPreview(for: key, immediately: cancelled)
         }
-        glideTrail.fillColor = nil; glideTrail.lineWidth = 4.5; glideTrail.lineCap = .round; glideTrail.lineJoin = .round
-        view.layer.addSublayer(glideTrail)
+        for layer in glideTrailSegments { view.layer.addSublayer(layer) }
         keyPreview.attach(to: view.layer)
         NSLayoutConstraint.activate([
             rows.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
@@ -1213,6 +1241,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             append(container, to: group)
         }
         func slider(_ text: String, value: Double, lower: Double, upper: Double,
+                    valueText: @escaping (Double) -> String = { "\(Int(($0 * 100).rounded()))%" },
                     group: UIStackView, change: @escaping (Double) -> Void) {
             let container = UIView()
             container.heightAnchor.constraint(greaterThanOrEqualToConstant: 64).isActive = true
@@ -1224,7 +1253,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             control.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(control)
             let valueLabel = UILabel(); valueLabel.textAlignment = .right
             valueLabel.font = .preferredFont(forTextStyle: .footnote); valueLabel.textColor = .secondaryLabel
-            valueLabel.text = "\(Int((value * 100).rounded()))%"
+            valueLabel.text = valueText(value)
             valueLabel.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(valueLabel)
             NSLayoutConstraint.activate([
                 title.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
@@ -1241,7 +1270,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             control.addAction(UIAction { [weak valueLabel, weak control] _ in
                 guard let control else { return }
                 let current = Double(control.value)
-                valueLabel?.text = "\(Int((current * 100).rounded()))%"
+                valueLabel?.text = valueText(current)
                 valueLabel?.accessibilityValue = valueLabel?.text
                 change(current)
             }, for: .valueChanged)
@@ -1330,6 +1359,18 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             self.settings.saveKeyboardOverrides()
             self.keyPlane.visualWidthScale = CGFloat(self.settings.visualKeyWidthScale)
             self.keyPlane.setNeedsLayout(); self.keyPlane.layoutIfNeeded()
+        }
+        slider("Затухание росчерка", value: settings.glideTrailFadeDuration, lower: 0.1, upper: 0.8,
+               valueText: { String(format: "%.2f с", $0) }, group: appearance) { [weak self] value in
+            guard let self else { return }
+            self.settings.glideTrailFadeDuration = KeyboardSettings.clampedGlideTrailFadeDuration(value)
+            self.settings.saveKeyboardOverrides()
+        }
+        slider("Толщина росчерка", value: settings.glideTrailWidth, lower: 2, upper: 10,
+               valueText: { "\(Int($0.rounded())) pt" }, group: appearance) { [weak self] value in
+            guard let self else { return }
+            self.settings.glideTrailWidth = KeyboardSettings.clampedGlideTrailWidth(value)
+            self.settings.saveKeyboardOverrides()
         }
         toggle("Отображение символа при нажатии", value: settings.showKeyPreview, group: appearance) { [weak self] value in
             guard let self else { return }
@@ -1795,7 +1836,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         drawGlide()
     }
     private func drawGlide() {
-        let cutoff = ProcessInfo.processInfo.systemUptime - 0.095
+        let now = ProcessInfo.processInfo.systemUptime
+        let fadeDuration = settings.glideTrailFadeDuration
+        let cutoff = now - fadeDuration
         trailSamples.removeAll { $0.time < cutoff }
         // Also cap spatial length: a fast sweep must not leave a long ribbon.
         let maximumLength = max(44, (keyPlane.recognizer?.geometry.pitch.width ?? 32) * 2.2)
@@ -1813,10 +1856,22 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             length += segment; firstIndex -= 1
         }
         if firstIndex > 0 { trailSamples.removeFirst(firstIndex) }
-        let path = UIBezierPath()
-        if let first = trailSamples.first { path.move(to: first.point); for sample in trailSamples.dropFirst() { path.addLine(to: sample.point) } }
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        glideTrail.frame = view.bounds; glideTrail.strokeColor = theme.foreground.withAlphaComponent(0.42).cgColor; glideTrail.path = path.cgPath
+        for index in glideTrailSegments.indices {
+            let layer = glideTrailSegments[index]
+            guard index + 1 < trailSamples.count else {
+                layer.path = nil; layer.isHidden = true
+                continue
+            }
+            let start = trailSamples[index], end = trailSamples[index + 1]
+            let path = CGMutablePath(); path.move(to: start.point); path.addLine(to: end.point)
+            let age = max(0, now - (start.time + end.time) / 2)
+            layer.frame = view.bounds
+            layer.lineWidth = CGFloat(settings.glideTrailWidth)
+            layer.strokeColor = theme.foreground.cgColor
+            layer.opacity = Float(max(0, min(1, 1 - age / fadeDuration)) * 0.42)
+            layer.path = path; layer.isHidden = false
+        }
         CATransaction.commit()
     }
     private func cancelGlide() {
@@ -1827,7 +1882,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private func resetGlidePresentation() {
         glideSnapshot = nil
         glidePan.cancelCurrentTouch()
-        trailTimer?.invalidate(); trailTimer = nil; trailSamples.removeAll(keepingCapacity: true); glideTrail.path = nil
+        trailTimer?.invalidate(); trailTimer = nil; trailSamples.removeAll(keepingCapacity: true)
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        for layer in glideTrailSegments { layer.path = nil; layer.isHidden = true }
+        CATransaction.commit()
     }
     private func acceptGlide(_ index: Int) {
         guard !pendingInput.isBusy else { return }

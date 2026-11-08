@@ -40,6 +40,8 @@ struct KeyboardSettings {
     var personalizationEnabled = true
     var keyboardHeightScale = 1.0
     var visualKeyWidthScale = 1.0
+    var glideTrailFadeDuration = 0.28
+    var glideTrailWidth = 4.5
 
     static func load(shared: Bool = true) -> KeyboardSettings {
         let defaults = shared ? (UserDefaults(suiteName: group) ?? .standard) : .standard
@@ -67,6 +69,8 @@ struct KeyboardSettings {
         result.personalizationEnabled = defaults.object(forKey: "personalizationEnabled") as? Bool ?? true
         result.keyboardHeightScale = clampedKeyboardHeight(defaults.object(forKey: "keyboardHeightScale") as? Double ?? 1)
         result.visualKeyWidthScale = clampedVisualKeyWidth(defaults.object(forKey: "visualKeyWidthScale") as? Double ?? 1)
+        result.glideTrailFadeDuration = clampedGlideTrailFadeDuration(defaults.object(forKey: "glideTrailFadeDuration") as? Double ?? 0.28)
+        result.glideTrailWidth = clampedGlideTrailWidth(defaults.object(forKey: "glideTrailWidth") as? Double ?? 4.5)
         if let values = defaults.stringArray(forKey: "languages") {
             result.languages = EnabledKeyboardLanguages.normalized(values.compactMap(KeyboardLanguage.init(rawValue:)))
         }
@@ -98,9 +102,11 @@ struct KeyboardSettings {
         defaults.set(personalizationEnabled, forKey: "personalizationEnabled")
         defaults.set(Self.clampedKeyboardHeight(keyboardHeightScale), forKey: "keyboardHeightScale")
         defaults.set(Self.clampedVisualKeyWidth(visualKeyWidthScale), forKey: "visualKeyWidthScale")
+        defaults.set(Self.clampedGlideTrailFadeDuration(glideTrailFadeDuration), forKey: "glideTrailFadeDuration")
+        defaults.set(Self.clampedGlideTrailWidth(glideTrailWidth), forKey: "glideTrailWidth")
         DarwinNotificationCenter.post(name: DarwinNotificationCenter.settingsUpdatedName)
     }
-    private static let overrideKeys = ["keyboard.haptics", "keyboard.extraSymbols", "keyboard.symbolHints", "keyboard.holdDelay", "keyboard.autoCorrection", "keyboard.compactKeys", "keyboard.showKeyPreview", "keyboard.doubleSpacePeriod", "keyboard.swipeDeleteWord", "keyboard.glideTyping", "keyboard.personalLexicon", "keyboard.autoCapitalization", "keyboard.touchAdaptationEnabled", "keyboard.debugTouchZones", "keyboard.languages", "keyboard.interfaceLanguage", "keyboard.emojiKeyEnabled", "keyboard.allowProfanitySuggestions", "keyboard.nextWordPrediction", "keyboard.personalizationEnabled", "keyboard.keyboardHeightScale", "keyboard.visualKeyWidthScale"]
+    private static let overrideKeys = ["keyboard.haptics", "keyboard.extraSymbols", "keyboard.symbolHints", "keyboard.holdDelay", "keyboard.autoCorrection", "keyboard.compactKeys", "keyboard.showKeyPreview", "keyboard.doubleSpacePeriod", "keyboard.swipeDeleteWord", "keyboard.glideTyping", "keyboard.personalLexicon", "keyboard.autoCapitalization", "keyboard.touchAdaptationEnabled", "keyboard.debugTouchZones", "keyboard.languages", "keyboard.interfaceLanguage", "keyboard.emojiKeyEnabled", "keyboard.allowProfanitySuggestions", "keyboard.nextWordPrediction", "keyboard.personalizationEnabled", "keyboard.keyboardHeightScale", "keyboard.visualKeyWidthScale", "keyboard.glideTrailFadeDuration", "keyboard.glideTrailWidth"]
     /// Extension-local overrides make these controls usable with SideStore even
     /// when the re-signed app cannot share an App Group with its extension.
     static func loadKeyboard(fullAccess: Bool) -> KeyboardSettings {
@@ -130,6 +136,8 @@ struct KeyboardSettings {
         if let value = defaults.object(forKey: overrideKeys[19]) as? Bool { result.personalizationEnabled = value }
         if let value = defaults.object(forKey: overrideKeys[20]) as? Double { result.keyboardHeightScale = clampedKeyboardHeight(value) }
         if let value = defaults.object(forKey: overrideKeys[21]) as? Double { result.visualKeyWidthScale = clampedVisualKeyWidth(value) }
+        if let value = defaults.object(forKey: overrideKeys[22]) as? Double { result.glideTrailFadeDuration = clampedGlideTrailFadeDuration(value) }
+        if let value = defaults.object(forKey: overrideKeys[23]) as? Double { result.glideTrailWidth = clampedGlideTrailWidth(value) }
         return result
     }
     func saveKeyboardOverrides() {
@@ -156,6 +164,8 @@ struct KeyboardSettings {
         defaults.set(personalizationEnabled, forKey: Self.overrideKeys[19])
         defaults.set(Self.clampedKeyboardHeight(keyboardHeightScale), forKey: Self.overrideKeys[20])
         defaults.set(Self.clampedVisualKeyWidth(visualKeyWidthScale), forKey: Self.overrideKeys[21])
+        defaults.set(Self.clampedGlideTrailFadeDuration(glideTrailFadeDuration), forKey: Self.overrideKeys[22])
+        defaults.set(Self.clampedGlideTrailWidth(glideTrailWidth), forKey: Self.overrideKeys[23])
     }
     static func clearKeyboardOverrides() {
         for key in overrideKeys where key != "keyboard.personalLexicon" { UserDefaults.standard.removeObject(forKey: key) }
@@ -175,6 +185,12 @@ struct KeyboardSettings {
     }
     static func clampedVisualKeyWidth(_ value: Double) -> Double {
         KeyboardSizing.visualWidthScale(value)
+    }
+    static func clampedGlideTrailFadeDuration(_ value: Double) -> Double {
+        value.isFinite ? min(0.8, max(0.1, value)) : 0.28
+    }
+    static func clampedGlideTrailWidth(_ value: Double) -> Double {
+        value.isFinite ? min(10, max(2, value)) : 4.5
     }
 }
 

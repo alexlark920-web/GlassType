@@ -18,7 +18,7 @@ final class SettingsViewController: UITableViewController {
     }
 
     override func numberOfSections(in tableView: UITableView) -> Int { 4 }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { [1, 23, 3, 1][section] }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { [1, 25, 3, 1][section] }
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         ["Подключение", "Настройки", "Языки — минимум один", "Проверка ввода"].indices.contains(section)
             ? t(["Подключение", "Настройки", "Языки — минимум один", "Проверка ввода"][section]) : nil
@@ -36,7 +36,7 @@ final class SettingsViewController: UITableViewController {
             cell.accessoryType = .disclosureIndicator
         }
         if indexPath.section == 1 {
-            let labels = ["Тема", "Подсказки", "Заглавная в начале предложения", "Виброотклик", "Символы удержанием", "Метки на клавишах", "Задержка удержания", "Автозамена", "Компактные клавиши", "Отображение символа при нажатии", "Двойной пробел → точка", "Свайп удаления слова", "Свайп-ввод слов", "Адаптация касаний", "Показать зоны касаний", "Лицензии словарей", "Заменить глобус на эмодзи", "Разрешить нецензурные слова в подсказках и автозамене", "Высота клавиатуры", "Визуальная ширина клавиш", "Предсказание следующего слова", "Локальное обучение подсказок", "Язык интерфейса"]
+            let labels = ["Тема", "Подсказки", "Заглавная в начале предложения", "Виброотклик", "Символы удержанием", "Метки на клавишах", "Задержка удержания", "Автозамена", "Компактные клавиши", "Отображение символа при нажатии", "Двойной пробел → точка", "Свайп удаления слова", "Свайп-ввод слов", "Адаптация касаний", "Показать зоны касаний", "Лицензии словарей", "Заменить глобус на эмодзи", "Разрешить нецензурные слова в подсказках и автозамене", "Высота клавиатуры", "Визуальная ширина клавиш", "Предсказание следующего слова", "Локальное обучение подсказок", "Язык интерфейса", "Затухание росчерка", "Толщина росчерка"]
             guard labels.indices.contains(indexPath.row) else { return cell }
             cell.textLabel?.text = t(labels[indexPath.row])
             cell.textLabel?.numberOfLines = indexPath.row == 17 ? 3 : ((indexPath.row == 2 || indexPath.row >= 9) ? 2 : 1)
@@ -64,20 +64,27 @@ final class SettingsViewController: UITableViewController {
                 control.accessibilityLabel = t("Язык интерфейса")
                 control.addTarget(self, action: #selector(interfaceLanguageChanged(_:)), for: .valueChanged)
                 cell.accessoryView = control
-            case 18, 19:
+            case 18, 19, 23, 24:
                 let slider = UISlider(frame: CGRect(x: 0, y: 0, width: 132, height: 32))
                 slider.tag = indexPath.row
                 if indexPath.row == 18 {
                     slider.minimumValue = 0.92; slider.maximumValue = 1.10
                     slider.value = Float(settings.keyboardHeightScale)
-                } else {
+                } else if indexPath.row == 19 {
                     slider.minimumValue = 0.84; slider.maximumValue = 1.12
                     slider.value = Float(settings.visualKeyWidthScale)
+                } else if indexPath.row == 23 {
+                    slider.minimumValue = 0.1; slider.maximumValue = 0.8
+                    slider.value = Float(settings.glideTrailFadeDuration)
+                } else {
+                    slider.minimumValue = 2; slider.maximumValue = 10
+                    slider.value = Float(settings.glideTrailWidth)
                 }
                 slider.accessibilityLabel = t(labels[indexPath.row])
-                slider.accessibilityValue = "\(Int((slider.value * 100).rounded()))%"
+                let display = sliderDisplayValue(slider.value, row: indexPath.row)
+                slider.accessibilityValue = display
                 slider.addTarget(self, action: #selector(sizeChanged(_:)), for: .valueChanged)
-                cell.detailTextLabel?.text = "\(Int((slider.value * 100).rounded()))%"
+                cell.detailTextLabel?.text = display
                 cell.accessoryView = slider
             default:
                 let control = UISwitch(); control.tag = indexPath.row
@@ -149,12 +156,22 @@ final class SettingsViewController: UITableViewController {
     @objc private func sizeChanged(_ control: UISlider) {
         let value = Double(control.value)
         if control.tag == 18 { settings.keyboardHeightScale = KeyboardSizing.heightScale(value) }
-        else { settings.visualKeyWidthScale = KeyboardSizing.visualWidthScale(value) }
-        control.accessibilityValue = "\(Int((value * 100).rounded()))%"
+        else if control.tag == 19 { settings.visualKeyWidthScale = KeyboardSizing.visualWidthScale(value) }
+        else if control.tag == 23 { settings.glideTrailFadeDuration = KeyboardSettings.clampedGlideTrailFadeDuration(value) }
+        else if control.tag == 24 { settings.glideTrailWidth = KeyboardSettings.clampedGlideTrailWidth(value) }
+        let display = sliderDisplayValue(control.value, row: control.tag)
+        control.accessibilityValue = display
         if let cell = tableView.cellForRow(at: IndexPath(row: control.tag, section: 1)) {
-            cell.detailTextLabel?.text = control.accessibilityValue
+            cell.detailTextLabel?.text = display
         }
         settings.save()
+    }
+    private func sliderDisplayValue(_ value: Float, row: Int) -> String {
+        switch row {
+        case 23: return String(format: "%.2f с", value)
+        case 24: return "\(Int(value.rounded())) pt"
+        default: return "\(Int((value * 100).rounded()))%"
+        }
     }
     @objc private func toggle(_ control: UISwitch) {
         switch control.tag {
