@@ -98,6 +98,7 @@ struct KeyboardSettings {
         defaults.set(personalizationEnabled, forKey: "personalizationEnabled")
         defaults.set(Self.clampedKeyboardHeight(keyboardHeightScale), forKey: "keyboardHeightScale")
         defaults.set(Self.clampedVisualKeyWidth(visualKeyWidthScale), forKey: "visualKeyWidthScale")
+        DarwinNotificationCenter.post(name: DarwinNotificationCenter.settingsUpdatedName)
     }
     private static let overrideKeys = ["keyboard.haptics", "keyboard.extraSymbols", "keyboard.symbolHints", "keyboard.holdDelay", "keyboard.autoCorrection", "keyboard.compactKeys", "keyboard.showKeyPreview", "keyboard.doubleSpacePeriod", "keyboard.swipeDeleteWord", "keyboard.glideTyping", "keyboard.personalLexicon", "keyboard.autoCapitalization", "keyboard.touchAdaptationEnabled", "keyboard.debugTouchZones", "keyboard.languages", "keyboard.interfaceLanguage", "keyboard.emojiKeyEnabled", "keyboard.allowProfanitySuggestions", "keyboard.nextWordPrediction", "keyboard.personalizationEnabled", "keyboard.keyboardHeightScale", "keyboard.visualKeyWidthScale"]
     /// Extension-local overrides make these controls usable with SideStore even

@@ -464,6 +464,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private let predictionQueue = DispatchQueue(label: "GlassType.prediction", qos: .userInitiated)
     private let glideDecoder = GlideDecoderActor()
     private var glideDecodeTask: Task<Void, Never>?
+    private var sharedSettingsObserver: DarwinNotificationObserver?
+    private var learnedWordsObserver: DarwinNotificationObserver?
+    private var learnedPersonalWords: [String] = []
+    private var learnedWordsGeneration: UInt = 0
+    private var personalLexiconRepository: PersonalLexiconRepository?
     private var predictionGeneration: UInt = 0
     private var pendingPredictionRequest: PredictionRequest?
     private let rows = UIStackView()
@@ -601,6 +606,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         ])
         let height = view.heightAnchor.constraint(equalToConstant: 280)
         height.priority = .init(999); height.isActive = true; heightConstraint = height
+        sharedSettingsObserver = DarwinNotificationCenter.observe(name: DarwinNotificationCenter.settingsUpdatedName) { [weak self] in
+            Task { @MainActor [weak self] in self?.reloadSettings() }
+        }
+        learnedWordsObserver = DarwinNotificationCenter.observe(name: PersonalLexiconRepository.learnedWordsNotificationName) { [weak self] in
+            Task { @MainActor [weak self] in self?.refreshLearnedWords() }
+        }
         reloadSettings()
     }
     override func viewWillAppear(_ animated: Bool) {
@@ -639,6 +650,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     override func selectionDidChange(_ textInput: UITextInput?) { invalidatePendingInput(); cancelCursorIfDocumentChanged(); invalidateSpaceSnapshot(); dismissPopup(); invalidateCorrectionUndo(); updateContext() }
     private func reloadSettings() {
         settings = KeyboardSettings.loadKeyboard(fullAccess: hasFullAccess)
+        personalLexiconRepository = hasFullAccess ? (personalLexiconRepository ?? (try? PersonalLexiconRepository())) : nil
+        refreshLearnedWords()
         let profileStore = predictionProfile
         predictionQueue.async { _ = profileStore.snapshot() }
         configureFeedback()
@@ -652,6 +665,27 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         prewarmLexicon()
         rebuild()
+    }
+    private func refreshLearnedWords() {
+        learnedWordsGeneration &+= 1
+        let generation = learnedWordsGeneration
+        let repository = personalLexiconRepository
+        predictionQueue.async { [weak self] in
+            let words = (try? repository?.topWords(limit: 500)) ?? []
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.learnedWordsGeneration == generation else { return }
+                self.learnedPersonalWords = words
+                self.refreshSuggestions()
+            }
+        }
+    }
+    private var effectivePersonalLexicon: PersonalLexicon {
+        var lexicon = settings.personalLexicon
+        var seen = Set<String>()
+        lexicon.knownWords = (learnedPersonalWords + lexicon.knownWords).filter {
+            seen.insert($0.precomposedStringWithCanonicalMapping.lowercased()).inserted
+        }
+        return lexicon.sanitized()
     }
     private func clear(_ stack: UIStackView) {
         stack.isUserInteractionEnabled = true
@@ -1717,8 +1751,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
               inputContext.isUsable else { return }
         let context = inputContext
         let token = pendingInput.begin(in: context)
-        let lexicon = settings.personalLexicon
-        let extras = Array(lexicon.replacements.values) + lexicon.excludedWords
+        let lexicon = effectivePersonalLexicon
+        let extras = lexicon.knownWords + Array(lexicon.replacements.values) + lexicon.excludedWords
         glideDecodeTask?.cancel()
         glideDecodeTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1969,7 +2003,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
               (1...24).contains(word.count), word.allSatisfy(\.isLetter),
               !SupplementalVocabulary.isProfanity(word, language: language) || settings.allowProfanitySuggestions else { return }
         let store = predictionProfile
-        predictionQueue.async { store.observe(context: previousContext, nextWord: word, language: language) }
+        let lexiconRepository = hasFullAccess ? personalLexiconRepository : nil
+        predictionQueue.async {
+            store.observe(context: previousContext, nextWord: word, language: language)
+            try? lexiconRepository?.learn(word)
+        }
     }
     private func learnCompletedWord(endingWith delimiter: String) {
         guard textDocumentProxy.isSecureTextEntry != true,
@@ -1985,7 +2023,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
               let word = personalWord(in: context) else { return false }
         guard suppressedCorrection != word,
               let replacement = textService.replacement(for: word, language: state.language,
-                                                        personalLexicon: settings.personalLexicon,
+                                                        personalLexicon: effectivePersonalLexicon,
                                                         includeProfanity: settings.allowProfanitySuggestions,
                                                         languageModel: settings.personalizationEnabled && textDocumentProxy.isSecureTextEntry != true
                                                             ? predictionProfile.snapshot() : PersonalNGramModel(),
@@ -2186,7 +2224,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let context = textDocumentProxy.documentContextBeforeInput
         let prefix = context.map { LocalSuggestionProvider.trailingWord(in: String($0.suffix(64))) } ?? ""
         let language = state.language
-        let personalLexicon = settings.personalLexicon
+        let personalLexicon = effectivePersonalLexicon
         let suggestionsEnabled = settings.suggestions
         let personalizationEnabled = settings.personalizationEnabled
         let allowProfanity = settings.allowProfanitySuggestions
