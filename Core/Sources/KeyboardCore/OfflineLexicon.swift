@@ -34,6 +34,39 @@ public enum OfflineLexicon {
             return bundled + SupplementalVocabulary.words(for: language).filter { seen.insert($0).inserted }
         }
 
+        func words(isCancelled: @Sendable () -> Bool) -> [String]? {
+            var bundled: [String] = []
+            if let orderedWordData {
+                guard let parsed = orderedWordData.withUnsafeBytes({ raw -> [String]? in
+                    guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return [] }
+                    var result: [String] = []
+                    var start = 0
+                    var line = 0
+                    for end in 0...raw.count {
+                        guard end == raw.count || bytes[end] == 10 else { continue }
+                        if line.isMultiple(of: 128), isCancelled() { return nil }
+                        var wordEnd = end
+                        if wordEnd > start, bytes[wordEnd - 1] == 13 { wordEnd -= 1 }
+                        if let tab = (start..<wordEnd).first(where: { bytes[$0] == 9 }) { wordEnd = tab }
+                        if wordEnd > start, result.count < 51_000 {
+                            result.append(String(decoding: UnsafeBufferPointer(start: bytes + start, count: wordEnd - start), as: UTF8.self))
+                        }
+                        start = end + 1
+                        line += 1
+                    }
+                    return result
+                }) else { return nil }
+                bundled = parsed
+            }
+            var result = bundled
+            var seen = Set(bundled)
+            for (index, word) in SupplementalVocabulary.words(for: language).enumerated() {
+                if index.isMultiple(of: 128), isCancelled() { return nil }
+                if seen.insert(word).inserted { result.append(word) }
+            }
+            return result
+        }
+
         /// Rank only this small query set by scanning the mapped source list.
         /// It avoids retaining an 80k-entry String/Dictionary index.
         func ranks(for words: [String]) -> [String: Int] {
@@ -182,6 +215,9 @@ public enum OfflineLexicon {
     }
     public static func isPrepared(language: KeyboardLanguage) -> Bool { preparedData(for: language) != nil }
     public static func words(language: KeyboardLanguage) -> [String] { data(for: language).words() }
+    static func words(language: KeyboardLanguage, isCancelled: @Sendable () -> Bool) -> [String]? {
+        data(for: language).words(isCancelled: isCancelled)
+    }
 
     public static func completions(prefix: String, language: KeyboardLanguage, limit: Int = 3,
                                    cachedOnly: Bool = false, includeProfanity: Bool = false) -> [String] {

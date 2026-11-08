@@ -169,7 +169,8 @@ public struct GlideDecoder {
             keyNames = language.rows.flatMap { $0 }
             ids = Dictionary(uniqueKeysWithValues: keyNames.enumerated().map { ($0.element, UInt8($0.offset)) })
             var seen = Set<String>()
-            for (rank, word) in GlideDecoder.words(for: language).enumerated() {
+            guard let words = GlideDecoder.words(for: language, isCancelled: isCancelled) else { return nil }
+            for (rank, word) in words.enumerated() {
                 if rank.isMultiple(of: 128), isCancelled() { return nil }
                 guard let candidate = entry(word, rank: rank), seen.insert(candidate.word).inserted,
                       let first = candidate.keys.first, let last = candidate.keys.last else { continue }
