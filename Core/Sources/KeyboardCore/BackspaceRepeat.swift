@@ -5,6 +5,7 @@ public enum BackspaceRepeat {
     /// deliberate hold to avoid accidental multi-character deletion.
     public static let initialDelay: TimeInterval = BackspaceEngine.initialDelay
     public static func interval(heldFor elapsed: TimeInterval) -> TimeInterval {
-        BackspaceEngine().nextInterval(heldFor: elapsed)
+        guard elapsed.isFinite, elapsed >= 0 else { return 0.05 }
+        return elapsed >= BackspaceEngine.accelerationAfter ? BackspaceEngine.acceleratedInterval : BackspaceEngine.repeatInterval
     }
 }
