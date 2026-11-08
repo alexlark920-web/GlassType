@@ -45,6 +45,9 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks
 
+      - name: Verify generated binary lexicons
+        run: python3 Scripts/build_binary_trie.py --check
+
       - name: Validate project structure
         run: python3 Scripts/validate_project.py
 
