@@ -11,9 +11,14 @@ private final class SuggestionButton: UIButton {
     override var isHighlighted: Bool {
         didSet {
             guard oldValue != isHighlighted else { return }
+            if isHighlighted {
+                layer.removeAllAnimations()
+                backgroundColor = pressedFill
+                return
+            }
             UIView.animate(withDuration: 0.075, delay: 0,
                            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
-                self.backgroundColor = self.isHighlighted ? self.pressedFill : .clear
+                self.backgroundColor = .clear
             }
         }
     }
@@ -176,7 +181,14 @@ private class KeyButton: UIButton {
                 child.alpha = self.trackpadAppearance ? 0 : 1
             }
         }
-        pressShade.layer.removeAllAnimations(); pressShade.alpha = down ? pressedAlpha : 0
+        pressShade.layer.removeAllAnimations()
+        if down { pressShade.alpha = pressedAlpha }
+        else if animated && !reducedMotion {
+            UIView.animate(withDuration: 0.12, delay: 0,
+                           options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
+                self.pressShade.alpha = 0
+            }
+        } else { pressShade.alpha = 0 }
         if !animated || reducedMotion { changes() }
         else if !lifts {
             UIView.animate(withDuration: 0.06, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut], animations: changes)
