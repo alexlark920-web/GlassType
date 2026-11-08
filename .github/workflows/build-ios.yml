@@ -112,13 +112,16 @@ jobs:
 
   publish:
     needs: build
-    if: needs.build.outputs.publish == 'true' && vars.DISTRIBUTION_REPOSITORY != ''
+    if: needs.build.outputs.publish == 'true'
     runs-on: macos-15
     timeout-minutes: 20
     permissions:
       contents: read
     env:
-      DISTRIBUTION_REPOSITORY: ${{ vars.DISTRIBUTION_REPOSITORY }}
+      # Keep the public SideStore repository fixed here so builds publish
+      # without requiring a separate repository variable. Only the write token
+      # needs to be configured as a secret.
+      DISTRIBUTION_REPOSITORY: ${{ vars.DISTRIBUTION_REPOSITORY || 'alexlark920-web/GlassType-Release' }}
       CHANNEL: ${{ needs.build.outputs.channel }}
       VERSION: ${{ needs.build.outputs.version }}
       BUILD_NUMBER: ${{ needs.build.outputs.build }}
@@ -126,34 +129,44 @@ jobs:
       IPA_NAME: ${{ needs.build.outputs.ipa_name }}
 
     steps:
+      - name: Check publication credentials
+        id: credentials
+        env:
+          DISTRIBUTION_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
+        run: |
+          if [[ -z "$DISTRIBUTION_TOKEN" ]]; then
+            echo '::notice::Set the DISTRIBUTION_TOKEN secret to enable SideStore publication.'
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$DISTRIBUTION_REPOSITORY" =~ ^[^/]+/[^/]+$ ]] || { echo 'Set DISTRIBUTION_REPOSITORY to owner/repository.' >&2; exit 1; }
+          echo 'enabled=true' >> "$GITHUB_OUTPUT"
+
       - name: Checkout private source for icon and release notes
+        if: steps.credentials.outputs.enabled == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Download tested IPA
+        if: steps.credentials.outputs.enabled == 'true'
         uses: actions/download-artifact@v4
         with:
           name: GlassType-${{ needs.build.outputs.channel }}-v${{ needs.build.outputs.version }}-build${{ needs.build.outputs.build }}
           path: build
 
-      - name: Require publication credentials
-        env:
-          DISTRIBUTION_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
-        run: |
-          test -n "$DISTRIBUTION_TOKEN" || { echo 'Set DISTRIBUTION_TOKEN secret before publication.' >&2; exit 1; }
-          [[ "$DISTRIBUTION_REPOSITORY" =~ ^[^/]+/[^/]+$ ]] || { echo 'Set DISTRIBUTION_REPOSITORY variable to owner/repository.' >&2; exit 1; }
-
       - name: Checkout public distribution repository
+        if: steps.credentials.outputs.enabled == 'true'
         uses: actions/checkout@v4
         with:
-          repository: ${{ vars.DISTRIBUTION_REPOSITORY }}
+          repository: ${{ vars.DISTRIBUTION_REPOSITORY || 'alexlark920-web/GlassType-Release' }}
           ref: main
           path: distribution
           token: ${{ secrets.DISTRIBUTION_TOKEN }}
           persist-credentials: false
 
       - name: Generate release notes from private commit history
+        if: steps.credentials.outputs.enabled == 'true'
         run: |
           previous=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
           if [[ -n "$previous" ]]; then
@@ -165,11 +178,13 @@ jobs:
           printf '%s\n' "$notes" > build/release-notes.md
 
       - name: Prepare official SideStore schema validator
+        if: steps.credentials.outputs.enabled == 'true'
         run: |
           python3 -m venv build/schema-venv
           build/schema-venv/bin/python -m pip install --disable-pip-version-check 'jsonschema==4.25.1'
 
       - name: Prepare release metadata and validate AltSource
+        if: steps.credentials.outputs.enabled == 'true'
         run: |
           mkdir -p distribution/assets
           cp App/Assets.xcassets/AppIcon.appiconset/AppIcon-Light.png distribution/assets/icon.png
@@ -180,6 +195,7 @@ jobs:
           build/schema-venv/bin/python Scripts/validate_alt_source.py "distribution/sources/$CHANNEL.json" Scripts/sidestore-source-schema.json
 
       - name: Publish IPA release to public distribution repository
+        if: steps.credentials.outputs.enabled == 'true'
         env:
           GH_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
         run: |
@@ -191,6 +207,7 @@ jobs:
           curl --fail --silent --show-error --location --head "$url" >/dev/null
 
       - name: Commit AltSource metadata and public icon
+        if: steps.credentials.outputs.enabled == 'true'
         working-directory: distribution
         env:
           DISTRIBUTION_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
@@ -204,6 +221,7 @@ jobs:
           unset auth
 
       - name: Verify public source JSON and icon URLs
+        if: steps.credentials.outputs.enabled == 'true'
         run: |
           source_url="https://raw.githubusercontent.com/$DISTRIBUTION_REPOSITORY/main/sources/$CHANNEL.json"
           icon_url="https://raw.githubusercontent.com/$DISTRIBUTION_REPOSITORY/main/assets/icon.png"
