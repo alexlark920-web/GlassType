@@ -6,8 +6,12 @@ import CoreGraphics
 public struct GlideDecoder {
     public init() {}
 
-    /// May be called on a background queue when a keyboard language is selected.
-    public static func prepare(language: KeyboardLanguage) { _ = storage.index(for: language) }
+    /// Selects the mapped dictionary without materializing the glide index.
+    /// The large geometric index is built only when a glide is actually decoded.
+    public static func prepare(language: KeyboardLanguage) {
+        storage.release()
+        OfflineLexicon.activate(language: language)
+    }
 
     public func decode(points: [CGPoint], keyCenters: [String: CGPoint],
                        language: KeyboardLanguage, extraWords: [String] = [], limit: Int = 3) -> [String] {
@@ -186,6 +190,9 @@ public struct GlideDecoder {
             lock.lock(); defer { lock.unlock() }
             if let cached, cached.language == language { return cached }
             let index = Index(language: language); cached = index; return index
+        }
+        func release() {
+            lock.lock(); cached = nil; lock.unlock()
         }
     }
     private static let storage = IndexStorage()

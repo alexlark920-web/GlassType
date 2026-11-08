@@ -34,6 +34,7 @@ public struct PredictionEngine {
                                               limit: max(limit * 6, 18))
         let previousContext = String(context.dropLast(prefix.count))
         let personalCandidates = Set(personalLexicon.completions(for: prefix, limit: 8).map { $0.lowercased() })
+        let frequencyRanks = OfflineLexicon.frequencyIndices(words: candidates, language: language)
         let ranked = candidates.enumerated().sorted { left, right in
             let leftScore = model.score(left.element, after: previousContext, language: language)
             let rightScore = model.score(right.element, after: previousContext, language: language)
@@ -41,8 +42,8 @@ public struct PredictionEngine {
             let leftIsPersonal = personalCandidates.contains(left.element.lowercased())
             let rightIsPersonal = personalCandidates.contains(right.element.lowercased())
             if leftIsPersonal != rightIsPersonal { return leftIsPersonal }
-            let leftRank = OfflineLexicon.frequencyIndex(word: left.element, language: language) ?? Int.max
-            let rightRank = OfflineLexicon.frequencyIndex(word: right.element, language: language) ?? Int.max
+            let leftRank = frequencyRanks[left.element.precomposedStringWithCanonicalMapping.lowercased()] ?? Int.max
+            let rightRank = frequencyRanks[right.element.precomposedStringWithCanonicalMapping.lowercased()] ?? Int.max
             return leftRank == rightRank ? left.offset < right.offset : leftRank < rightRank
         }.map(\.element)
         return PredictionResult(prefix: prefix, words: Array(ranked.prefix(limit)))

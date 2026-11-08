@@ -11,7 +11,7 @@ GlassType сочетает мягкую геометрию Material 3 с пол�
 
 EN / RU / UK · светлая и тёмная темы · свайп-ввод · локальные словари · без рекламы и сетевых запросов
 
-[Исходники](https://github.com/alexlark920-web/GlassType) · [Сборки GitHub Actions](https://github.com/alexlark920-web/GlassType/actions/workflows/build-ios.yml) · [Результаты проверок](Docs/CHECK_RESULTS.txt) · [Архитектура ввода](Docs/TOUCH-INPUT.md) · [Отзывчивость 1.7 и источники](Docs/RESPONSIVENESS-1.7.md)
+[Исходники](https://github.com/alexlark920-web/GlassType) · [Сборки GitHub Actions](https://github.com/alexlark920-web/GlassType/actions/workflows/build-ios.yml) · [Результаты проверок](Docs/CHECK_RESULTS.txt) · [Бинарные словари](Docs/BINARY-LEXICON.md) · [Архитектура ввода](Docs/TOUCH-INPUT.md) · [Отзывчивость 1.7 и источники](Docs/RESPONSIVENESS-1.7.md)
 
 ## Статус проекта
 

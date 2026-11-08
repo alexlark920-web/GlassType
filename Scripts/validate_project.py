@@ -130,6 +130,21 @@ for language in ['en', 'ru', 'uk']:
     require(len(words) == manifest['languages'][language]['words'], f'{language}: wrong word count')
     require(len(words) >= 25000 and len(words) == len(set(words)), f'{language}: missing or duplicate words')
     require(hashlib.sha256(data).hexdigest() == manifest['languages'][language]['sha256'], f'{language}: corpus changed')
+    trie = (resources / f'lexicon_{language}.trie').read_bytes()
+    require(len(trie) >= 6 and len(trie) % 6 == 0 and trie[0] == 0, f'{language}: invalid trie header')
+    nodes = len(trie) // 6
+    terminals = 0
+    for offset in range(0, len(trie), 6):
+        flags = trie[offset + 1]
+        child = int.from_bytes(trie[offset + 2:offset + 6], 'little')
+        require(flags & ~0x03 == 0, f'{language}: unknown node flags at {offset}')
+        require(child == 0 or (child >= 6 and child < len(trie) and child % 6 == 0),
+                f'{language}: invalid child offset at {offset}')
+        if flags & 0x02:
+            require(offset + 12 <= len(trie), f'{language}: sibling exceeds trie bounds at {offset}')
+        terminals += bool(flags & 0x01)
+    require(terminals == len(words), f'{language}: trie has {terminals} terminal nodes for {len(words)} words')
+    require((ROOT / 'Scripts/build_binary_trie.py').is_file(), 'Missing binary trie generator')
 for name in ['Dictionary-Attribution.txt', 'CC-BY-SA-4.0.txt', 'MPL-1.1.txt']:
     require((resources / name).is_file(), f'Missing license {name}')
 emoji_manifest = json.loads((resources / 'emoji_catalog-manifest.json').read_text())
