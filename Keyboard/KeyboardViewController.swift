@@ -2226,6 +2226,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let language = state.language
         let personalLexicon = effectivePersonalLexicon
         let suggestionsEnabled = settings.suggestions
+        let autoCorrectionEnabled = settings.autoCorrection
         let personalizationEnabled = settings.personalizationEnabled
         let allowProfanity = settings.allowProfanitySuggestions
         let nextWordEnabled = settings.nextWordPrediction && textAllowsAutomation
@@ -2247,12 +2248,21 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                                                        includeProfanity: allowProfanity,
                                                        nextWordPrediction: nextWordEnabled, limit: 3)
             } else { result = PredictionResult(prefix: prefix, words: []) }
-            let canOfferSave = result.words.isEmpty && suggestionsEnabled && !isSecure &&
+            let canOfferSave = suggestionsEnabled && !isSecure &&
                 (3...64).contains(result.prefix.count) && result.prefix.allSatisfy(\.isLetter) &&
                 !SupplementalVocabulary.isProfanity(result.prefix, language: language) &&
                 !personalLexicon.containsKnownWord(result.prefix) &&
                 OfflineLexicon.preparedCheck(result.prefix, language: language)?.known == false
-            let words = result.words.map { candidate -> String in
+            var candidateWords = result.words
+            if canOfferSave { candidateWords = Array(candidateWords.prefix(2)) }
+            if candidateWords.isEmpty && !autoCorrectionEnabled && canOfferSave,
+               let spelling = OfflineLexicon.preparedCheck(result.prefix, language: language),
+               !personalLexicon.excludes(result.prefix) {
+                candidateWords = AutocorrectionEngine().rankedSuggestions(
+                    for: result.prefix, language: language, candidates: spelling.rankedCandidates,
+                    limit: 2, languageModel: profile, previousContext: boundedContext)
+            }
+            let words = candidateWords.map { candidate -> String in
                 if result.prefix.isEmpty && shift != .off {
                     return shift == .locked ? candidate.uppercased() : candidate.capitalized
                 }
@@ -2286,26 +2296,33 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let signature = language.rawValue + "|" + prefix + "|" + words.joined(separator: "|") + (canOfferSave ? "|save" : "")
         guard suggestionSignature != signature else { return }
         suggestionSignature = signature
-        if words.isEmpty {
-            clear(suggestions)
-            if canOfferSave {
-                let button = makeSuggestionButton("＋  " + localized("Добавить в личный словарь") + "  «" + prefix + "»")
-                button.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
-                button.accessibilityHint = localized("Слово будет сохранено только на этом устройстве")
-                button.addAction(UIAction { [weak self] _ in self?.saveCurrentWordToPersonalDictionary(prefix) }, for: .touchUpInside)
-                suggestions.addArrangedSubview(button)
-            }
-            return
+        clear(suggestions)
+        for index in words.indices {
+            let button = makeSuggestionButton(words[index]); button.titleLabel?.font = .systemFont(ofSize: 16)
+            button.addAction(UIAction { [weak self] _ in self?.acceptSuggestion(at: index) }, for: .touchUpInside)
+            suggestions.addArrangedSubview(button)
         }
-        if suggestions.arrangedSubviews.count != words.count || !(suggestions.arrangedSubviews.first is UIButton) {
-            clear(suggestions)
-            for index in words.indices {
-                let button = makeSuggestionButton(""); button.titleLabel?.font = .systemFont(ofSize: 16)
-                button.addAction(UIAction { [weak self] _ in self?.acceptSuggestion(at: index) }, for: .touchUpInside)
-                suggestions.addArrangedSubview(button)
-            }
+        if canOfferSave {
+            let button = makeAddAsTypedButton(prefix)
+            button.addAction(UIAction { [weak self] _ in self?.saveCurrentWordToPersonalDictionary(prefix) }, for: .touchUpInside)
+            suggestions.addArrangedSubview(button)
         }
-        for (view, word) in zip(suggestions.arrangedSubviews, words) { (view as? UIButton)?.setTitle(word, for: .normal) }
+    }
+    private func makeAddAsTypedButton(_ word: String) -> UIButton {
+        let button = makeSuggestionButton(word)
+        button.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
+        button.backgroundColor = theme.key.withAlphaComponent(0.58)
+        button.layer.cornerRadius = 13
+        button.layer.borderWidth = 0.5
+        button.layer.borderColor = theme.foreground.withAlphaComponent(0.18).cgColor
+        button.setImage(UIImage(systemName: "plus"), for: .normal)
+        button.tintColor = theme.foreground.withAlphaComponent(0.82)
+        button.semanticContentAttribute = .forceLeftToRight
+        button.imageEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 5)
+        button.contentEdgeInsets = UIEdgeInsets(top: 5, left: 10, bottom: 5, right: 10)
+        button.accessibilityLabel = localized("Добавить слово в словарь как есть") + " «" + word + "»"
+        button.accessibilityHint = localized("Слово будет сохранено только на этом устройстве")
+        return button
     }
     private func acceptSuggestion(at index: Int) {
         guard suggestionWords.indices.contains(index), let prefix = pendingPrefix else { return }

@@ -56,6 +56,54 @@ public struct AutocorrectionEngine {
         return word == lower.capitalized ? best.word.capitalized : best.word
     }
 
+    /// Returns a small, ranked set for explicit user selection. Unlike
+    /// `rankedReplacement`, this never chooses a replacement automatically.
+    public func rankedSuggestions(for word: String, language: KeyboardLanguage,
+                                  candidates: [Candidate], limit: Int = 2,
+                                  isKnownWord: Bool = false,
+                                  languageModel: PersonalNGramModel = PersonalNGramModel(),
+                                  previousContext: String = "") -> [String] {
+        guard !isKnownWord, limit > 0, (4...24).contains(word.count) else { return [] }
+        let lower = word.lowercased()
+        guard word == lower || word == lower.capitalized,
+              !word.allSatisfy(\.isUppercase), lower.allSatisfy(\.isLetter),
+              isNative(lower, language: language) else { return [] }
+
+        var matches: [String: Candidate] = [:]
+        for candidate in candidates.prefix(32) {
+            let text = candidate.word.lowercased()
+            guard text != lower, text.allSatisfy(\.isLetter), isNative(text, language: language),
+                  Self.isSingleEdit(lower, text) else { continue }
+            let rank = candidate.frequencyRank.flatMap { $0 >= 0 ? $0 : nil }
+            if let existing = matches[text] {
+                if let rank, rank < (existing.frequencyRank ?? Int.max) {
+                    matches[text] = Candidate(text, frequencyRank: rank)
+                }
+            } else {
+                matches[text] = Candidate(text, frequencyRank: rank)
+            }
+        }
+
+        let contextualScores = matches.keys.map {
+            ($0, languageModel.score($0, after: previousContext, language: language))
+        }
+        let weakestContextScore = contextualScores.map { $0.1 }.min() ?? 0
+        let contextScores = Dictionary(uniqueKeysWithValues: contextualScores)
+        let ranked = matches.map { text, candidate -> (word: String, score: Double) in
+            let prior = candidate.frequencyRank.map { 0.15 * log(Double($0) + 16.0) } ?? 1.35
+            let advantage = max(0, (contextScores[text] ?? weakestContextScore) - weakestContextScore)
+            return (text, editCost(lower, text, language: language) + prior - min(1.4, advantage * 0.5))
+        }.filter { $0.score <= 2.65 }
+            .sorted { left, right in
+                if left.score == right.score { return left.word < right.word }
+                return left.score < right.score
+            }
+            .prefix(limit)
+            .map { $0.word }
+
+        return ranked.map { word == lower.capitalized ? $0.capitalized : $0 }
+    }
+
     private func editCost(_ a: String, _ b: String, language: KeyboardLanguage) -> Double {
         let source = Array(a), target = Array(b)
         guard source.count == target.count else { return 0.80 }

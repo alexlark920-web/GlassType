@@ -56,6 +56,26 @@ final class AutocorrectionTests: XCTestCase {
             .init("hello", frequencyRank: 10), .init("help", frequencyRank: 10)
         ]))
     }
+    func testRankedSuggestionsReturnSelectableAlternativesWithoutChoosingOne() {
+        let candidates = [AutocorrectionEngine.Candidate("hello", frequencyRank: 10),
+                          AutocorrectionEngine.Candidate("help", frequencyRank: 5_000)]
+        XCTAssertEqual(engine.rankedSuggestions(for: "hellp", language: .english,
+                                                candidates: candidates, limit: 2), ["hello", "help"])
+        XCTAssertEqual(engine.rankedSuggestions(for: "Hellp", language: .english,
+                                                candidates: candidates, limit: 1), ["Hello"])
+        XCTAssertEqual(engine.rankedSuggestions(for: "hellp", language: .english,
+                                                candidates: candidates, isKnownWord: true), [])
+        XCTAssertEqual(engine.rankedSuggestions(for: "HELPP", language: .english,
+                                                candidates: candidates), [])
+    }
+    func testRussianDoubleLetterTypoOffersTheIntendedWord() throws {
+        _ = OfflineLexicon.words(language: .russian)
+        let spelling = try XCTUnwrap(OfflineLexicon.preparedCheck("пррвет", language: .russian))
+        let suggestions = engine.rankedSuggestions(for: "пррвет", language: .russian,
+                                                   candidates: spelling.rankedCandidates, limit: 2)
+        XCTAssertEqual(suggestions.first, "привет")
+        XCTAssertLessThanOrEqual(suggestions.count, 2)
+    }
     func testLocalLanguageProfileCanRerankAnOtherwiseDominantCorrection() {
         let candidates = [AutocorrectionEngine.Candidate("help", frequencyRank: 1),
                           AutocorrectionEngine.Candidate("hello", frequencyRank: 10_000)]
