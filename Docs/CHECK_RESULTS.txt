@@ -26,3 +26,19 @@ GlassType-unsigned-IPA (4,413,456 bytes) и GlassType-source-v1.11-build19 (2,36
 
 Локально в Linux также проходит структурная проверка; Swift/Xcode недоступны. Ручные проверки
 emoji-поиска, подложек подсказок, Backspace и пользовательского словаря на iPhone не проводились.
+
+
+GlassType 1.16 (26) — GitHub Actions #42 завершился успешно 7 ноября 2026 года:
+https://github.com/alexlark920-web/GlassType/actions/runs/42384142074
+
+Подтверждены структурная проверка проекта, XCTest и сборка generic iOS Simulator,
+unsigned device archive/IPA и проверка IPA с Keyboard Extension. Артефакт
+GlassType-beta-v1.16.42-build42 (4,879,602 bytes) доступен до 7 декабря 2026 года.
+Публикация в отдельный репозиторий была пропущена: условия публикации не настроены.
+
+Ревизия исходников по состоянию на 8 ноября 2026 года: проверены PredictionEngine,
+PersonalNGramModel, AutocorrectionEngine и pipeline, OfflineLexicon,
+PersonalLexicon, GlideDecoder, ввод пунктуации, структурный валидатор и workflow.
+В просмотренных участках критичных ошибок не выявлено. CI #42 прошёл; это не заменяет
+проверку на устройстве. Остаются ручные сценарии из Docs/VALIDATION.md, включая
+пунктуацию после закрывающих знаков, точность glide, многопальцевый ввод и secure-поля.
