@@ -33,7 +33,7 @@ public final class DarwinNotificationObserver: @unchecked Sendable {
         guard handler != nil else { lock.unlock(); return }
         handler = nil
         lock.unlock()
-        CFNotificationCenterRemoveObserver(center, Unmanaged.passUnretained(self).toOpaque(), notificationName.rawValue, nil)
+        CFNotificationCenterRemoveObserver(center, Unmanaged.passUnretained(self).toOpaque(), notificationName, nil)
     }
 
     deinit { cancel() }
