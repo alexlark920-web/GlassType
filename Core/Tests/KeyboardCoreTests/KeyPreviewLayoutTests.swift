@@ -29,6 +29,20 @@ final class KeyPreviewLayoutTests: XCTestCase {
         let layout = try XCTUnwrap(KeyPreviewLayout.make(keyFrame: key, availableBounds: bounds))
         XCTAssertTrue(bounds.contains(layout.frame))
     }
+    func testRussianEdgeLetterKeysReceiveTheSameClampedPreview() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 393, height: 254)
+        let geometry = KeyboardGeometry.make(bounds: bounds, language: .russian)
+        let edgeLetters = [0, 2].flatMap { row in
+            let rowLetters = geometry.keys.filter { $0.row == row && $0.role.character != nil }
+            return [rowLetters.first, rowLetters.last].compactMap { $0 }
+        }
+        XCTAssertEqual(edgeLetters.compactMap(\.role.character), ["й", "ъ", "я", "ю"])
+        for key in edgeLetters {
+            let preview = try XCTUnwrap(KeyPreviewLayout.make(keyFrame: key.visualFrame, availableBounds: bounds), key.role.character!)
+            XCTAssertTrue(bounds.contains(preview.frame), key.role.character!)
+            XCTAssertGreaterThan(preview.stemWidth, 0, key.role.character!)
+        }
+    }
     func testInvalidOrOffscreenGeometryIsIgnored() {
         let bounds = CGRect(x: 0, y: 0, width: 393, height: 254)
         XCTAssertNil(KeyPreviewLayout.make(keyFrame: .zero, availableBounds: bounds))
