@@ -981,7 +981,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         button.pressBehavior = button is SpacebarButton ? .spacebar : .function
         button.addAction(UIAction { [weak self, weak button] _ in
             self?.synchronizeCapitalization(); self?.refreshLabels()
-            self?.performFeedback()
+            // DeleteKeyButton emits feedback synchronously from its own
+            // touch-down path; do not trigger a second impact for the same tap.
+            if let button, !(button is DeleteKeyButton) { self?.performFeedback() }
             if let button {
                 if button === self?.languageButton { self?.scheduleSettingsHint(for: button) }
                 else { self?.showKeyPreview(for: button) }
