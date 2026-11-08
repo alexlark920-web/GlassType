@@ -9,7 +9,7 @@ final class SharedDatabaseTests: XCTestCase {
         return directory.appendingPathComponent(SharedDatabase.fileName)
     }
 
-    private func generatedWord(_ index: Int) -> String {
+    private static func generatedWord(_ index: Int) -> String {
         var value = index
         var suffix = ""
         repeat {
@@ -39,7 +39,7 @@ final class SharedDatabaseTests: XCTestCase {
         DispatchQueue.concurrentPerform(iterations: 160) { index in
             let database = index.isMultiple(of: 2) ? host : keyboard
             do {
-                try database.recordLearnedWord(generatedWord(index % 24), at: Date(timeIntervalSince1970: Double(index)))
+                try database.recordLearnedWord(Self.generatedWord(index % 24), at: Date(timeIntervalSince1970: Double(index)))
                 _ = try database.learnedWords(limit: 32)
             } catch {
                 failures.append(error)
@@ -54,11 +54,11 @@ final class SharedDatabaseTests: XCTestCase {
         let database = try SharedDatabase(url: temporaryDatabaseURL())
         let firstUse = Date(timeIntervalSince1970: 1)
         for index in 0..<5_120 {
-            try database.recordLearnedWord(generatedWord(index), at: firstUse.addingTimeInterval(Double(index)))
+            try database.recordLearnedWord(Self.generatedWord(index), at: firstUse.addingTimeInterval(Double(index)))
         }
         XCTAssertEqual(try database.learnedWordCount(), PersonalLexiconRepository.maximumWordCount)
-        XCTAssertFalse(try database.learnedWords(limit: 5_000).contains(generatedWord(0)))
-        XCTAssertTrue(try database.learnedWords(limit: 5_000).contains(generatedWord(5_119)))
+        XCTAssertFalse(try database.learnedWords(limit: 5_000).contains(Self.generatedWord(0)))
+        XCTAssertTrue(try database.learnedWords(limit: 5_000).contains(Self.generatedWord(5_119)))
     }
 
     func testRepositoryCachesTopWordsAndRejectsInvalidEntries() throws {
