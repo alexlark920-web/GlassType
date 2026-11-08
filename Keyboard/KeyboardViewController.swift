@@ -254,78 +254,6 @@ private final class TextKeyButton: KeyButton {
     }
 }
 
-/// One reusable silhouette, always clamped to the extension's bounds.
-private final class KeyPreviewView: UIView {
-    private let silhouette = CAShapeLayer()
-    private let glyph = UILabel()
-    private let symbol = UIImageView()
-    private var stemCenterX: CGFloat = 0
-    private var stemWidth: CGFloat = 0
-    private var fill: UIColor = .secondarySystemBackground
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .clear; isOpaque = false
-        isUserInteractionEnabled = false; isAccessibilityElement = false
-        layer.addSublayer(silhouette)
-        layer.shadowColor = UIColor.black.cgColor; layer.shadowOpacity = 0.20
-        layer.shadowRadius = 3; layer.shadowOffset = CGSize(width: 0, height: 2)
-        glyph.textAlignment = .center; glyph.adjustsFontSizeToFitWidth = true
-        glyph.minimumScaleFactor = 0.75; glyph.isAccessibilityElement = false
-        addSubview(glyph)
-        symbol.contentMode = .scaleAspectFit; symbol.isAccessibilityElement = false; symbol.isHidden = true; addSubview(symbol)
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func configure(layout: KeyPreviewLayout, text: String, fill: UIColor, ink: UIColor) {
-        frame = layout.frame; stemCenterX = layout.stemCenterX; stemWidth = layout.stemWidth
-        self.fill = fill; glyph.text = text; glyph.textColor = ink
-        symbol.image = nil; symbol.isHidden = true
-        silhouette.fillColor = fill.resolvedColor(with: traitCollection).cgColor
-        setNeedsLayout(); layoutIfNeeded()
-    }
-    func configureSymbol(layout: KeyPreviewLayout, name: String, fill: UIColor, ink: UIColor) {
-        configure(layout: layout, text: "", fill: fill, ink: ink)
-        symbol.image = UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 26, weight: .medium))
-        symbol.tintColor = ink; symbol.isHidden = false; setNeedsLayout(); layoutIfNeeded()
-    }
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        guard bounds.width > 0, bounds.height >= 24 else {
-            silhouette.path = nil; layer.shadowPath = nil; glyph.frame = .zero; return
-        }
-        let bubbleHeight = max(1, bounds.height - 12)
-        let width = bounds.width
-        let radius: CGFloat = min(10, bubbleHeight / 3)
-        let left = stemCenterX - stemWidth / 2, right = stemCenterX + stemWidth / 2
-        let path = UIBezierPath()
-        path.move(to: CGPoint(x: radius, y: 0))
-        path.addLine(to: CGPoint(x: width - radius, y: 0))
-        path.addQuadCurve(to: CGPoint(x: width, y: radius), controlPoint: CGPoint(x: width, y: 0))
-        path.addLine(to: CGPoint(x: width, y: bubbleHeight - radius))
-        path.addQuadCurve(to: CGPoint(x: width - radius, y: bubbleHeight), controlPoint: CGPoint(x: width, y: bubbleHeight))
-        path.addLine(to: CGPoint(x: min(width - radius, right + 4), y: bubbleHeight))
-        path.addQuadCurve(to: CGPoint(x: right, y: bubbleHeight + 4), controlPoint: CGPoint(x: right, y: bubbleHeight))
-        path.addLine(to: CGPoint(x: right, y: bounds.height - 3))
-        path.addQuadCurve(to: CGPoint(x: right - 3, y: bounds.height), controlPoint: CGPoint(x: right, y: bounds.height))
-        path.addLine(to: CGPoint(x: left + 3, y: bounds.height))
-        path.addQuadCurve(to: CGPoint(x: left, y: bounds.height - 3), controlPoint: CGPoint(x: left, y: bounds.height))
-        path.addLine(to: CGPoint(x: left, y: bubbleHeight + 4))
-        path.addQuadCurve(to: CGPoint(x: max(radius, left - 4), y: bubbleHeight), controlPoint: CGPoint(x: left, y: bubbleHeight))
-        path.addLine(to: CGPoint(x: radius, y: bubbleHeight))
-        path.addQuadCurve(to: CGPoint(x: 0, y: bubbleHeight - radius), controlPoint: CGPoint(x: 0, y: bubbleHeight))
-        path.addLine(to: CGPoint(x: 0, y: radius))
-        path.addQuadCurve(to: CGPoint(x: radius, y: 0), controlPoint: CGPoint(x: 0, y: 0))
-        path.close()
-        silhouette.frame = bounds; silhouette.path = path.cgPath; layer.shadowPath = path.cgPath
-        glyph.frame = CGRect(x: 4, y: 0, width: max(0, bounds.width - 8), height: bubbleHeight)
-        glyph.font = .systemFont(ofSize: min(34, max(25, bubbleHeight - 10)))
-        symbol.frame = CGRect(x: (bounds.width - 28) / 2, y: max(0, (bubbleHeight - 28) / 2), width: 28, height: 28)
-    }
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        silhouette.fillColor = fill.resolvedColor(with: traitCollection).cgColor
-    }
-}
-
 /// UIButton tracking owns the whole touch, so swipe/hold never also insert a
 /// space. Accessibility activation remains a normal space action.
 private final class SpacebarButton: KeyButton {
@@ -399,6 +327,7 @@ private final class DeleteKeyButton: KeyButton {
     var pressBeganAction: (() -> Void)?
     var pressEndedWithoutSwipeAction: (() -> Void)?
     var repeatDeleteAction: (() -> Void)?
+    var repeatDeleteWordAction: (() -> Void)?
     var deleteWordAction: (() -> Void)?
     var canSwipeWord: (() -> Bool)?
     private var delay: Timer?
@@ -410,24 +339,30 @@ private final class DeleteKeyButton: KeyButton {
         swipeEligible = canSwipeWord?() == true
         heldSince = ProcessInfo.processInfo.systemUptime
         pressBeganAction?()
-        scheduleRepeat(after: BackspaceRepeat.initialDelay)
+        scheduleRepeat(after: BackspaceEngine.initialDelay)
         return true
     }
     private var heldSince: TimeInterval = 0
+    private let engine = BackspaceEngine()
     private func scheduleRepeat(after interval: TimeInterval) {
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             guard let self, self.deleteGestureActive, !self.swiped else { return }
             self.repeated = true
-            if let action = self.repeatDeleteAction { action() } else { self.deleteAction?() }
+            let elapsed = ProcessInfo.processInfo.systemUptime - self.heldSince
+            switch self.engine.nextDeletion(heldFor: elapsed) {
+            case .character:
+                if let action = self.repeatDeleteAction { action() } else { self.deleteAction?() }
+            case .word: self.repeatDeleteWordAction?()
+            }
             guard self.deleteGestureActive, !self.swiped else { return }
-            self.scheduleRepeat(after: BackspaceRepeat.interval(heldFor: ProcessInfo.processInfo.systemUptime - self.heldSince))
+            self.scheduleRepeat(after: self.engine.nextInterval(heldFor: ProcessInfo.processInfo.systemUptime - self.heldSince))
         }
         delay = timer; RunLoop.main.add(timer, forMode: .common)
     }
     override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
         guard deleteGestureActive else { return false }
         let p = touch.location(in: self)
-        if !repeated, swipeEligible, p.x - start.x < -32, abs(p.y - start.y) < abs(p.x - start.x) * 0.6 {
+        if engine.shouldSwipeDelete(start: start, current: p, repeated: repeated, enabled: swipeEligible) {
             swiped = true; delay?.invalidate(); delay = nil
         }
         if !point(inside: p, with: event), !swiped {
@@ -436,7 +371,7 @@ private final class DeleteKeyButton: KeyButton {
         } else if !swiped && delay == nil {
             isHighlighted = true
             let elapsed = ProcessInfo.processInfo.systemUptime - heldSince
-            scheduleRepeat(after: max(0.035, BackspaceRepeat.initialDelay - elapsed))
+            scheduleRepeat(after: max(0.035, BackspaceEngine.initialDelay - elapsed))
         }
         return true
     }
@@ -444,7 +379,7 @@ private final class DeleteKeyButton: KeyButton {
         guard deleteGestureActive else { super.endTracking(touch, with: event); return }
         let p = touch?.location(in: self) ?? start
         let eligible = !repeated && swipeEligible
-        let word = (swiped || eligible) && p.x - start.x < -32 && abs(p.y - start.y) < abs(p.x - start.x) * 0.6
+        let word = swiped || engine.shouldSwipeDelete(start: start, current: p, repeated: repeated, enabled: eligible)
         cancelInteraction(); super.endTracking(touch, with: event)
         if word { deleteWordAction?() } else { pressEndedWithoutSwipeAction?() }
     }
@@ -501,7 +436,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var languageSwitches: [KeyboardLanguage: UISwitch] = [:]
     private var popupStartX: CGFloat = 0
     private var popupInitialIndex = 0
-    private let keyPreview = KeyPreviewView(frame: .zero)
+    private let keyPreview = KeyPreviewPresenter()
+    private var backspaceEngine = BackspaceEngine()
     private weak var previewKey: KeyButton?
     private var previewHide: DispatchWorkItem?
     private var previewGeneration: UInt = 0
@@ -597,7 +533,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         glideTrail.fillColor = nil; glideTrail.lineWidth = 4.5; glideTrail.lineCap = .round; glideTrail.lineJoin = .round
         view.layer.addSublayer(glideTrail)
-        keyPreview.isHidden = true; view.addSubview(keyPreview)
+        keyPreview.attach(to: view.layer)
         NSLayoutConstraint.activate([
             rows.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             rows.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
@@ -762,6 +698,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 deleteButton?.pressBeganAction = { [weak self] in self?.beginBackspacePress() }
                 deleteButton?.pressEndedWithoutSwipeAction = { [weak self] in self?.deleteSwipeRestoreSuffix = "" }
                 deleteButton?.repeatDeleteAction = { [weak self] in self?.deleteOnce(allowGlideWord: false) }
+                deleteButton?.repeatDeleteWordAction = { [weak self] in self?.deleteWord(force: true) }
                 deleteButton?.deleteWordAction = { [weak self] in self?.deleteWord() }
                 deleteButton?.canSwipeWord = { [weak self] in
                     guard let self else { return false }
@@ -1032,17 +969,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
               button.window != nil, let text = button.title(for: .normal), !text.isEmpty,
               let placement = KeyPreviewLayout.make(keyFrame: button.convert(button.bounds, to: view), availableBounds: view.bounds) else { hideKeyPreview(); return }
         previewHide?.cancel(); previewHide = nil; previewGeneration &+= 1
-        let wasHidden = keyPreview.isHidden
         previewKey = button
-        keyPreview.layer.removeAllAnimations(); keyPreview.transform = .identity
-        keyPreview.configure(layout: placement, text: text, fill: theme.key.withAlphaComponent(1), ink: theme.foreground)
-        view.bringSubviewToFront(keyPreview); keyPreview.isHidden = false
-        if wasHidden && !UIAccessibility.isReduceMotionEnabled {
-            keyPreview.alpha = 0; keyPreview.transform = CGAffineTransform(scaleX: 0.97, y: 0.97)
-            UIView.animate(withDuration: 0.07, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-                self.keyPreview.alpha = 1; self.keyPreview.transform = .identity
-            }
-        } else { keyPreview.alpha = 1 }
+        keyPreview.show(layout: placement, text: text, fill: theme.key, ink: theme.foreground)
     }
     private func finishKeyPreview(for button: KeyButton, immediately: Bool) {
         if button === languageButton { settingsHintTask?.cancel(); settingsHintTask = nil }
@@ -1059,8 +987,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private func hideKeyPreview() {
         settingsHintTask?.cancel(); settingsHintTask = nil
         previewHide?.cancel(); previewHide = nil; previewKey = nil; previewGeneration &+= 1
-        keyPreview.layer.removeAllAnimations(); keyPreview.isHidden = true
-        keyPreview.alpha = 1; keyPreview.transform = .identity
+        keyPreview.hide()
     }
     private var canLearnTouch: Bool {
         settings.touchAdaptationEnabled && !state.symbols && !state.emoji && !cursorMode && settingsPanel == nil && lexiconEditing == nil &&
@@ -1560,18 +1487,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             guard let self, let button, self.settingsPanel == nil, !self.cursorMode,
                   let layout = KeyPreviewLayout.make(keyFrame: button.convert(button.bounds, to: self.view), availableBounds: self.view.bounds) else { return }
             self.previewGeneration &+= 1; self.previewKey = button
-            self.keyPreview.configureSymbol(layout: layout, name: "gearshape.fill", fill: self.theme.key.withAlphaComponent(1), ink: self.theme.foreground)
-            self.keyPreview.alpha = 1; self.keyPreview.transform = .identity
-            self.keyPreview.isHidden = false; self.view.bringSubviewToFront(self.keyPreview)
+            self.keyPreview.showSymbol(layout: layout, name: "gearshape.fill", fill: self.theme.key, ink: self.theme.foreground)
         }
         settingsHintTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0.08, settings.holdDelay - 0.12), execute: task)
     }
-    private func deleteWord() {
+    private func deleteWord(force: Bool = false) {
         if pendingInput.deferIfBusy(.deleteWord) { return }
-        let restoreSuffix = deleteSwipeRestoreSuffix
+        let restoreSuffix = force ? "" : deleteSwipeRestoreSuffix
         deleteSwipeRestoreSuffix = ""
-        guard settings.swipeDeleteWord, lexiconEditing == nil, !cursorMode else { return }
+        guard (force || settings.swipeDeleteWord), lexiconEditing == nil, !cursorMode else { return }
         completedWord = nil
         lastSpace = nil; correctionUndo = nil; glideWords = []; glideUndo = nil
         guard (textDocumentProxy.selectedText ?? "").isEmpty else { return }
@@ -1603,7 +1528,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if !reachedBoundary && deleted.count >= 128 {
             textDocumentProxy.insertText(deleted); updateContext(); return
         }
-        deletionUndo = TextDeletionUndo(deletedText: deleted + restoreSuffix, before: remaining, after: after, document: document)
+        if force { deletionUndo = nil }
+        else { deletionUndo = TextDeletionUndo(deletedText: deleted + restoreSuffix, before: remaining, after: after, document: document) }
         performFeedback(); suggestionSignature = nil; updateContext()
     }
 
@@ -2182,10 +2108,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         guard !cursorMode else { return }
         if lexiconEditing != nil {
             state.synchronize(context: currentDraft, autoCapitalization: true)
+            backspaceEngine.synchronizeBuffer(contextBeforeInput: currentDraft)
             draftLabel?.text = editorPrompt + currentDraft + "▏"
             refreshLabels(); return
         }
         synchronizeCapitalization()
+        backspaceEngine.synchronizeBuffer(contextBeforeInput: textDocumentProxy.documentContextBeforeInput)
         refreshLabels(); refreshSuggestions()
     }
     private func refreshSuggestions() {
