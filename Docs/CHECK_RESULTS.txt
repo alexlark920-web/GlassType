@@ -42,3 +42,19 @@ PersonalLexicon, GlideDecoder, ввод пунктуации, структурн
 В просмотренных участках критичных ошибок не выявлено. CI #42 прошёл; это не заменяет
 проверку на устройстве. Остаются ручные сценарии из Docs/VALIDATION.md, включая
 пунктуацию после закрывающих знаков, точность glide, многопальцевый ввод и secure-поля.
+
+
+GlassType 1.16.46 (build 46) — GitHub Actions #46 завершился успешно 8 ноября 2026 года:
+https://github.com/alexlark920-web/GlassType/actions/runs/42454392973
+
+Прошли проверка совпадения trie с исходными словарями, структурная проверка проекта,
+Release XCTest, сборка generic iOS Simulator, unsigned device archive/IPA и проверка
+IPA с Keyboard Extension. XCTest подтвердили инициализацию mmap <1 мс и 10 000 raw
+lookup <5 мс на runner GitHub Actions.
+
+Beta IPA (7,063,329 bytes; SHA-256 15546DF63B42A612E10A117BCF35C8A824731109CB7DAB7337BDF6D98E091093)
+опубликован в GlassType-Release: https://github.com/alexlark920-web/GlassType-Release
+SideStore Beta: https://raw.githubusercontent.com/alexlark920-web/GlassType-Release/main/sources/beta.json
+
+Целевой RSS <5 МБ не измерен на iPhone. Память во время glide зависит также от
+геометрического индекса GlideDecoder; для подтверждения лимита нужен Instruments на устройстве.
