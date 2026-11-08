@@ -18,7 +18,11 @@ public final class SharedDatabase: @unchecked Sendable {
     private var connection: OpaquePointer?
     public let fileURL: URL
 
-    public convenience init(appGroupIdentifier: String = Self.appGroupIdentifier) throws {
+    public convenience init() throws {
+        try self.init(appGroupIdentifier: Self.appGroupIdentifier)
+    }
+
+    public convenience init(appGroupIdentifier: String) throws {
         guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
             throw SharedDatabaseError.appGroupUnavailable(appGroupIdentifier)
         }

@@ -20,7 +20,7 @@ public final class DarwinNotificationObserver: @unchecked Sendable {
         self.handler = handler
         CFNotificationCenterAddObserver(center, Unmanaged.passUnretained(self).toOpaque(),
                                         glassTypeDarwinNotificationCallback,
-                                        notificationName, nil, .deliverImmediately)
+                                        notificationName.rawValue, nil, .deliverImmediately)
     }
 
     fileprivate func deliver() {
@@ -33,7 +33,7 @@ public final class DarwinNotificationObserver: @unchecked Sendable {
         guard handler != nil else { lock.unlock(); return }
         handler = nil
         lock.unlock()
-        CFNotificationCenterRemoveObserver(center, Unmanaged.passUnretained(self).toOpaque(), notificationName, nil)
+        CFNotificationCenterRemoveObserver(center, Unmanaged.passUnretained(self).toOpaque(), notificationName.rawValue, nil)
     }
 
     deinit { cancel() }
