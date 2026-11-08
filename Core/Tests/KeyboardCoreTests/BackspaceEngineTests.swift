@@ -4,9 +4,10 @@ import XCTest
 @testable import KeyboardCore
 
 final class BackspaceEngineTests: XCTestCase {
-    func testHoldStartsAfterInitialDelayAndAccelerates() {
+    func testFirstDeletionIsImmediateAndHoldRepeatsAlmostImmediately() {
         let engine = BackspaceEngine()
-        XCTAssertEqual(BackspaceEngine.initialDelay, 0.4, accuracy: 0.000_001)
+        XCTAssertEqual(BackspaceEngine.initialDelay, 0.05, accuracy: 0.000_001)
+        XCTAssertEqual(BackspaceEngine.initialDelay, BackspaceEngine.repeatInterval, accuracy: 0.000_001)
         XCTAssertEqual(engine.nextInterval(heldFor: 0.5), 0.05, accuracy: 0.000_001)
         XCTAssertEqual(engine.nextInterval(heldFor: 0.8), 0.03, accuracy: 0.000_001)
         XCTAssertEqual(engine.nextInterval(heldFor: 1.6), 0.2, accuracy: 0.000_001)
