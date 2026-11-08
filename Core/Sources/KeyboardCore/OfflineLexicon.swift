@@ -179,39 +179,60 @@ public enum OfflineLexicon {
         }
     }
 
+    /// Owns the mutable active snapshot behind one lock-protected Sendable reference.
+    private final class ActiveDataSetStorage: @unchecked Sendable {
+        private let lock = NSLock()
+        private var active: DataSet?
+
+        func activate(language: KeyboardLanguage) {
+            lock.lock(); defer { lock.unlock() }
+            guard active?.language != language else { return }
+            active = DataSet(language: language)
+        }
+
+        func release() {
+            lock.lock(); active = nil; lock.unlock()
+        }
+
+        func data(for language: KeyboardLanguage) -> DataSet {
+            lock.lock(); defer { lock.unlock() }
+            if let active, active.language == language { return active }
+            let next = DataSet(language: language)
+            active = next
+            return next
+        }
+
+        func preparedData(for language: KeyboardLanguage) -> DataSet? {
+            guard lock.try() else { return nil }
+            defer { lock.unlock() }
+            return active?.language == language ? active : nil
+        }
+    }
+
     public static var licenseNotice: String {
         ["Dictionary-Attribution", "CC-BY-SA-4.0", "MPL-1.1"].compactMap { name in
             Bundle.module.url(forResource: name, withExtension: "txt").flatMap { try? String(contentsOf: $0, encoding: .utf8) }
         }.joined(separator: "\n\n")
     }
 
-    private static let lock = NSLock()
-    private static var active: DataSet?
+    private static let activeDataSet = ActiveDataSetStorage()
 
     /// Select a language and release the previous mapped resource immediately
     /// when no in-flight caller still holds it.
     public static func activate(language: KeyboardLanguage) {
-        lock.lock(); defer { lock.unlock() }
-        guard active?.language != language else { return }
-        active = DataSet(language: language)
+        activeDataSet.activate(language: language)
     }
 
     /// Drop the cache explicitly when the keyboard leaves the lexicon feature.
     public static func releaseActiveLanguage() {
-        lock.lock(); active = nil; lock.unlock()
+        activeDataSet.release()
     }
 
     private static func data(for language: KeyboardLanguage) -> DataSet {
-        lock.lock(); defer { lock.unlock() }
-        if let active, active.language == language { return active }
-        let next = DataSet(language: language)
-        active = next
-        return next
+        activeDataSet.data(for: language)
     }
     private static func preparedData(for language: KeyboardLanguage) -> DataSet? {
-        guard lock.try() else { return nil }
-        defer { lock.unlock() }
-        return active?.language == language ? active : nil
+        activeDataSet.preparedData(for: language)
     }
     public static func isPrepared(language: KeyboardLanguage) -> Bool { preparedData(for: language) != nil }
     public static func words(language: KeyboardLanguage) -> [String] { data(for: language).words() }
@@ -224,7 +245,7 @@ public enum OfflineLexicon {
         let key = normalized(prefix)
         guard (1...24).contains(key.count), limit > 0,
               let dictionary = cachedOnly ? preparedData(for: language) : Optional(data(for: language)),
-              let trie = dictionary.trie else { return [] }
+              dictionary.trie != nil else { return [] }
         return dictionary.completions(prefix: key, limit: min(8, limit), includeProfanity: includeProfanity)
     }
 

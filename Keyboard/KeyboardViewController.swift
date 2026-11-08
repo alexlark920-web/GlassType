@@ -1766,7 +1766,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             glideSnapshot = (inputContext, state.language)
             trailSamples.removeAll(keepingCapacity: true)
             appendTrailPoint(pan.points.last ?? pan.startPoint)
-            let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.drawGlide() }
+            let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in self?.drawGlide() }
+            }
             trailTimer?.invalidate(); trailTimer = timer; RunLoop.main.add(timer, forMode: .common)
         case .changed:
             if let point = pan.points.last { appendTrailPoint(point) }
