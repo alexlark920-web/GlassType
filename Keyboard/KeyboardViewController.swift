@@ -462,6 +462,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private let predictionEngine = PredictionEngine()
     private let predictionProfile = LocalPredictionModelStore()
     private let predictionQueue = DispatchQueue(label: "GlassType.prediction", qos: .userInitiated)
+    private let glideDecoder = GlideDecoderActor()
+    private var glideDecodeTask: Task<Void, Never>?
     private var predictionGeneration: UInt = 0
     private var pendingPredictionRequest: PredictionRequest?
     private let rows = UIStackView()
@@ -469,7 +471,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private var touchAdaptation = TouchCalibrationStorage.load()
     private var pendingCalibrationSamples = 0
     private let lexiconQueue = DispatchQueue(label: "GlassType.lexicon", qos: .userInitiated)
-    private struct GlideRequest {
+    private struct GlideRequest: Sendable {
         let points: [CGPoint]
         let centers: [String: CGPoint]
         let language: KeyboardLanguage
@@ -1717,11 +1719,19 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let token = pendingInput.begin(in: context)
         let lexicon = settings.personalLexicon
         let extras = Array(lexicon.replacements.values) + lexicon.excludedWords
-        lexiconQueue.async { [weak self] in
-            let decoded = GlideDecoder().decode(points: request.points, keyCenters: request.centers,
-                                                language: request.language, extraWords: extras)
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.pendingInput.token == token else { return }
+        glideDecodeTask?.cancel()
+        glideDecodeTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let decoded: [String]
+            do {
+                decoded = try await self.glideDecoder.decode(points: request.points, keyCenters: request.centers,
+                                                             language: request.language, extraWords: extras)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, self.pendingInput.token == token else { return }
                 guard self.view.window != nil, self.settings.glideTyping, !self.state.symbols, !self.state.emoji,
                       !self.cursorMode, self.settingsPanel == nil, self.lexiconEditing == nil,
                       self.textAllowsAutomation, self.state.language == request.language else {
@@ -1730,7 +1740,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 guard self.pendingInput.finish(token: token, in: self.inputContext) else { return }
                 self.preservingActiveStroke { self.commitGlide(decoded, context: context) }
                 self.drainInput()
-            }
         }
     }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
@@ -1837,6 +1846,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         CATransaction.commit()
     }
     private func cancelGlide() {
+        glideDecodeTask?.cancel(); glideDecodeTask = nil
         pendingInput.cancel()
         resetGlidePresentation()
     }

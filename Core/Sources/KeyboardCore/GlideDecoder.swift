@@ -15,8 +15,17 @@ public struct GlideDecoder {
 
     public func decode(points: [CGPoint], keyCenters: [String: CGPoint],
                        language: KeyboardLanguage, extraWords: [String] = [], limit: Int = 3) -> [String] {
+        decode(points: points, keyCenters: keyCenters, language: language, extraWords: extraWords, limit: limit, isCancelled: { false })
+    }
+
+    /// Cancellation-aware entry point used by the asynchronous glide actor.
+    /// Checks are made while building/traversing the lexicon index and ranking candidates.
+    public func decode(points: [CGPoint], keyCenters: [String: CGPoint], language: KeyboardLanguage,
+                       extraWords: [String] = [], limit: Int = 3,
+                       isCancelled: @Sendable () -> Bool) -> [String] {
+        guard !isCancelled() else { return [] }
         guard limit > 0, (2...4096).contains(points.count), let geometry = Geometry(keyCenters) else { return [] }
-        let index = Self.storage.index(for: language)
+        guard let index = Self.storage.index(for: language, isCancelled: isCancelled) else { return [] }
         let mapped = index.keyNames.map { keyCenters[$0].map(geometry.normalize) }
         var raw: [Point] = []
         let sampleCount = min(points.count, 256)
@@ -44,6 +53,7 @@ public struct GlideDecoder {
         var candidateIndices = Set<Int>()
         for start in starts {
             for end in ends {
+                if isCancelled() { return [] }
                 let bucket = Index.bucket(start, end)
                 if let entries = index.endpoints[bucket] { candidateIndices.formUnion(entries) }
             }
@@ -51,6 +61,7 @@ public struct GlideDecoder {
         var candidates = candidateIndices.map { index.entries[$0] }
         var personal = Set<String>()
         for word in extraWords.prefix(200) {
+            if isCancelled() { return [] }
             if let entry = index.entry(word, rank: 0), personal.insert(entry.word).inserted {
                 candidates.append(entry)
             }
@@ -59,6 +70,7 @@ public struct GlideDecoder {
         var seen = Set<String>()
         var shortlist: [Scored] = []
         for entry in candidates {
+            if isCancelled() { return [] }
             guard seen.insert(entry.word).inserted else { continue }
             var template: [Point] = []
             var supported = true
@@ -87,6 +99,7 @@ public struct GlideDecoder {
         shortlist.sort { $0.coarse == $1.coarse ? $0.word < $1.word : $0.coarse < $1.coarse }
         var ranked: [(word: String, score: Double)] = []
         for item in shortlist.prefix(128) {
+            if isCancelled() { return [] }
             let ideal = resample(item.template, count: observed.count)
             let direct = meanDistance(observed, ideal)
             let warped = alignmentCost(observed, ideal)
@@ -151,12 +164,14 @@ public struct GlideDecoder {
         let ids: [String: UInt8]
         var entries: [Entry] = []
         var endpoints: [UInt16: [Int]] = [:]
-        init(language: KeyboardLanguage) {
+        init?(language: KeyboardLanguage, isCancelled: @Sendable () -> Bool) {
             self.language = language
             keyNames = language.rows.flatMap { $0 }
             ids = Dictionary(uniqueKeysWithValues: keyNames.enumerated().map { ($0.element, UInt8($0.offset)) })
             var seen = Set<String>()
-            for (rank, word) in GlideDecoder.words(for: language).enumerated() {
+            guard let words = GlideDecoder.words(for: language, isCancelled: isCancelled) else { return nil }
+            for (rank, word) in words.enumerated() {
+                if rank.isMultiple(of: 128), isCancelled() { return nil }
                 guard let candidate = entry(word, rank: rank), seen.insert(candidate.word).inserted,
                       let first = candidate.keys.first, let last = candidate.keys.last else { continue }
                 endpoints[Self.bucket(Int(first), Int(last)), default: []].append(entries.count)
@@ -186,10 +201,11 @@ public struct GlideDecoder {
     private final class IndexStorage: @unchecked Sendable {
         private let lock = NSLock()
         private var cached: Index?
-        func index(for language: KeyboardLanguage) -> Index {
+        func index(for language: KeyboardLanguage, isCancelled: @Sendable () -> Bool) -> Index? {
             lock.lock(); defer { lock.unlock() }
-            if let cached, cached.language == language { return cached }
-            let index = Index(language: language); cached = index; return index
+            if let cached, cached.language == language { return isCancelled() ? nil : cached }
+            guard let index = Index(language: language, isCancelled: isCancelled) else { return nil }
+            cached = index; return index
         }
         func release() {
             lock.lock(); cached = nil; lock.unlock()

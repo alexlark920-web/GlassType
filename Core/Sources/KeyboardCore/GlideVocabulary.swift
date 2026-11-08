@@ -6,4 +6,8 @@ extension GlideDecoder {
     static func words(for language: KeyboardLanguage) -> [String] {
         OfflineLexicon.words(language: language)
     }
+
+    static func words(for language: KeyboardLanguage, isCancelled: @Sendable () -> Bool) -> [String]? {
+        OfflineLexicon.words(language: language, isCancelled: isCancelled)
+    }
 }
