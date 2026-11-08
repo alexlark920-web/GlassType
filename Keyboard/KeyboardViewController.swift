@@ -181,8 +181,15 @@ private class KeyButton: UIButton {
                 child.alpha = self.trackpadAppearance ? 0 : 1
             }
         }
-        pressShade.layer.removeAllAnimations(); pressShade.alpha = down ? pressedAlpha : 0
-        if !animated || reducedMotion || down { changes() }
+        pressShade.layer.removeAllAnimations()
+        if down { pressShade.alpha = pressedAlpha }
+        else if animated && !reducedMotion {
+            UIView.animate(withDuration: 0.12, delay: 0,
+                           options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
+                self.pressShade.alpha = 0
+            }
+        } else { pressShade.alpha = 0 }
+        if !animated || reducedMotion { changes() }
         else if !lifts {
             UIView.animate(withDuration: 0.06, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut], animations: changes)
         } else {
