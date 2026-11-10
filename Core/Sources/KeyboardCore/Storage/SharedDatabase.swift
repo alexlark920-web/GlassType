@@ -11,7 +11,7 @@ public enum SharedDatabaseError: Error, Sendable, Equatable {
 /// Each instance serializes its own connection; SQLite WAL and busy timeout
 /// coordinate separate connections in the app and keyboard extension.
 public final class SharedDatabase: @unchecked Sendable {
-    public static let appGroupIdentifier = "group.com.glasstype.shared"
+    public static let appGroupIdentifier = "group.org.opentype.GlassType"
     public static let fileName = "GlassTypeShared.sqlite"
 
     private let lock = NSLock()

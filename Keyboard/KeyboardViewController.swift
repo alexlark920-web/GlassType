@@ -596,6 +596,12 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated); flushTouchCalibration(); cancelGlide(); hideKeyPreview(); spaceButton?.cancelInteraction(); stopDeleting(); dismissPopup(); hideLocalSettings(); feedback = nil; correctionUndo = nil; suppressedCorrection = nil
     }
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        OfflineLexicon.releaseActiveLanguage()
+        dismissPopup()
+        hideKeyPreview()
+    }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         guard view.bounds.width > 0 else { return }

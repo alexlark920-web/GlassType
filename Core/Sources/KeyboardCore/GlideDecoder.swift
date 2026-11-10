@@ -187,7 +187,9 @@ public struct GlideDecoder {
                 if !character.isLetter { continue }
                 var key = String(character)
                 if language == .russian && key == "ё" { key = "е" }
+                if language == .russian && key == "ъ" { key = "ь" }
                 if language == .ukrainian && key == "ґ" { key = "г" }
+                if language == .ukrainian && key == "ї" { key = "і" }
                 if language == .english { key = key.folding(options: .diacriticInsensitive, locale: Locale(identifier: "en")) }
                 guard let id = ids[key] else { return nil }
                 if keys.last != id { keys.append(id) }

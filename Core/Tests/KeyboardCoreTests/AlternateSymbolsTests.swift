@@ -12,7 +12,9 @@ final class AlternateSymbolsTests: XCTestCase {
     }
     func testDisabledSymbolsPreserveLanguageVariants() {
         XCTAssertEqual(KeyboardLanguage.russian.holdAlternatives(for: "е", symbolsEnabled: false), ["ё"])
+        XCTAssertEqual(KeyboardLanguage.russian.holdAlternatives(for: "ь", symbolsEnabled: false), ["ъ"])
         XCTAssertEqual(KeyboardLanguage.ukrainian.holdAlternatives(for: "г", symbolsEnabled: false), ["ґ"])
+        XCTAssertEqual(KeyboardLanguage.ukrainian.holdAlternatives(for: "і", symbolsEnabled: false), ["ї"])
         XCTAssertEqual(KeyboardLanguage.english.holdAlternatives(for: "e", symbolsEnabled: false), ["é", "è", "ë", "ê"])
         XCTAssertTrue(KeyboardLanguage.english.holdAlternatives(for: "q", symbolsEnabled: false).isEmpty)
     }

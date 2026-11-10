@@ -7,13 +7,13 @@ public enum KeyboardLanguage: String, CaseIterable, Codable, Sendable {
         let rows: [String]
         switch self {
         case .english: rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
-        case .russian: rows = ["йцукенгшщзхъ", "фывапролджэ", "ячсмитьбю"]
-        case .ukrainian: rows = ["йцукенгшщзхї", "фівапролджє", "ячсмитьбю"]
+        case .russian: rows = ["йцукенгшщзх", "фывапролджэ", "ячсмитьбю"]
+        case .ukrainian: rows = ["йцукенгшщзх", "фівапролджє", "ячсмитьбю"]
         }
         return rows.map { $0.map(String.init) }
     }
     public func alternatives(for key: String) -> [String] {
-        let common = ["е": ["ё"], "г": ["ґ"], "ь": ["ъ"], "и": ["і", "ї"], "a": ["á", "à", "ä", "â"], "e": ["é", "è", "ë", "ê"], "i": ["í", "ï", "î"], "o": ["ó", "ö", "ô"], "u": ["ú", "ü", "û"], "n": ["ñ"], ".": [",", "?", "!", ":", ";", "…"], "'": ["’", "ʼ"]]
+        let common = ["е": ["ё"], "г": ["ґ"], "ь": ["ъ"], "і": ["ї"], "и": ["і"], "a": ["á", "à", "ä", "â"], "e": ["é", "è", "ë", "ê"], "i": ["í", "ï", "î"], "o": ["ó", "ö", "ô"], "u": ["ú", "ü", "û"], "n": ["ñ"], ".": [",", "?", "!", ":", ";", "…"], "'": ["’", "ʼ"]]
         return common[key] ?? []
     }
 }

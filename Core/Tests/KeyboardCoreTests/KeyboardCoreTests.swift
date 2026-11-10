@@ -12,13 +12,16 @@ final class KeyboardCoreTests: XCTestCase {
     }
     func testUkrainianAlphabetIncludesSpecificLettersAndAlternativeGhe() {
         let keys = KeyboardLanguage.ukrainian.rows.flatMap { $0 }
-        for key in ["і", "ї", "є"] { XCTAssertTrue(keys.contains(key)) }
+        for key in ["і", "є"] { XCTAssertTrue(keys.contains(key)) }
+        XCTAssertFalse(keys.contains("ї"))
+        XCTAssertEqual(KeyboardLanguage.ukrainian.alternatives(for: "і"), ["ї"])
         XCTAssertEqual(KeyboardLanguage.ukrainian.alternatives(for: "г"), ["ґ"])
         XCTAssertFalse(keys.contains("ы"))
     }
     func testRussianYoAvailableOnHold() {
         XCTAssertEqual(KeyboardLanguage.russian.alternatives(for: "е"), ["ё"])
-        XCTAssertTrue(KeyboardLanguage.russian.rows.flatMap { $0 }.contains("ъ"))
+        XCTAssertEqual(KeyboardLanguage.russian.alternatives(for: "ь"), ["ъ"])
+        XCTAssertFalse(KeyboardLanguage.russian.rows.flatMap { $0 }.contains("ъ"))
     }
     func testOneShotShift() {
         var state = InputState()
