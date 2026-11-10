@@ -108,6 +108,89 @@ public final class MappedBinaryLexicon: @unchecked Sendable {
     /// Diagnostic/compatibility enumeration. Callers should prefer prefix lookup.
     public func allWords() -> [String] { findWords(matchingPrefix: "", limit: Int.max) }
 
+    @inline(__always)
+    public func rootNode() -> Int { 0 }
+
+    @inline(__always)
+    public func isTerminal(node: Int) -> Bool {
+        guard node >= 0 else { return false }
+        return data.withUnsafeBytes { raw in
+            guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                  node + 1 < raw.count else { return false }
+            return bytes[node + 1] & Self.terminal != 0
+        }
+    }
+
+    @inline(__always)
+    public func childNode(of parent: Int, byte: UInt8) -> Int? {
+        guard parent >= 0 else { return nil }
+        return data.withUnsafeBytes { raw in
+            guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return nil }
+            var child = Self.childOffset(bytes, parent: parent)
+            while child != 0 {
+                guard child + Self.nodeSize <= raw.count else { return nil }
+                let current = bytes[child]
+                if current == byte { return child }
+                if current > byte { break }
+                child = (bytes[child + 1] & Self.hasSibling == 0) ? 0 : child + Self.nodeSize
+            }
+            return nil
+        }
+    }
+
+    @inline(__always)
+    public func transition(from parent: Int, utf8: (UInt8, UInt8, UInt8, UInt8), length: UInt8) -> (node: Int, isTerminal: Bool)? {
+        guard length > 0, parent >= 0 else { return nil }
+        return data.withUnsafeBytes { raw -> (node: Int, isTerminal: Bool)? in
+            guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return nil }
+            var currentParent = parent
+            var currentIsTerminal = false
+
+            for i in 0..<Int(length) {
+                let targetByte: UInt8
+                switch i {
+                case 0: targetByte = utf8.0
+                case 1: targetByte = utf8.1
+                case 2: targetByte = utf8.2
+                default: targetByte = utf8.3
+                }
+
+                var child = Self.childOffset(bytes, parent: currentParent)
+                var found = 0
+                while child != 0 {
+                    guard child + Self.nodeSize <= raw.count else { return nil }
+                    let b = bytes[child]
+                    if b == targetByte {
+                        found = child
+                        break
+                    }
+                    if b > targetByte { break }
+                    child = (bytes[child + 1] & Self.hasSibling == 0) ? 0 : child + Self.nodeSize
+                }
+                guard found != 0 else { return nil }
+                currentParent = found
+                currentIsTerminal = (bytes[found + 1] & Self.terminal != 0)
+            }
+            return (currentParent, currentIsTerminal)
+        }
+    }
+
+    @inline(__always)
+    public func forEachChild(of parent: Int, _ body: (UInt8, Int, Bool) -> Void) {
+        guard parent >= 0 else { return }
+        data.withUnsafeBytes { raw in
+            guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            var child = Self.childOffset(bytes, parent: parent)
+            while child != 0 {
+                guard child + Self.nodeSize <= raw.count else { return }
+                let byte = bytes[child]
+                let isTerm = (bytes[child + 1] & Self.terminal != 0)
+                body(byte, child, isTerm)
+                child = (bytes[child + 1] & Self.hasSibling == 0) ? 0 : child + Self.nodeSize
+            }
+        }
+    }
+
     private static func childOffset(_ bytes: UnsafePointer<UInt8>, parent: Int) -> Int {
         Int(readUInt32(bytes, at: parent + 2))
     }
