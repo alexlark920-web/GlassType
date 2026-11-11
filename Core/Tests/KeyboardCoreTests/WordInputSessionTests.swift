@@ -35,15 +35,14 @@ final class WordInputSessionTests: XCTestCase {
             XCTAssertNil(record.deletionCount(in: changed))
         }
     }
-    func testBackspaceDeletesExactlyTheLastGlideInsertionIncludingItsJoinSpace() {
-        let current = context("👋 привет мир ")
-        let record = CompletedWordInsertion(origin: .glide, insertedText: " мир ", context: current)!
-        var text = current.before!
-        text.removeLast(record.deletionCount(in: current)!)
-        XCTAssertEqual(text, "👋 привет")
-        let suggestion = CompletedWordInsertion(origin: .suggestion, insertedText: " мир ", context: current)!
-        XCTAssertNil(suggestion.deletionCount(in: current))
-        XCTAssertNil(CompletedWordInsertion(origin: .glide, insertedText: "missing ", context: current))
+    func testFirstBackspaceAfterCandidateCommitUsesOrdinarySingleCharacterDeletion() {
+        for origin in [CompletedWordInsertion.Origin.glide, .suggestion] {
+            let current = context("👋 привет мир ")
+            let insertion = CompletedWordInsertion(origin: origin, insertedText: " мир ", context: current)!
+            // nil means the controller falls through to textDocumentProxy.deleteBackward(),
+            // removing only the trailing automatic space on this first press.
+            XCTAssertNil(insertion.deletionCount(in: current))
+        }
     }
     func testFollowingPunctuationAndLettersWaitForDecodeInOriginalOrder() {
         var sequence = PendingInputSequence<String>()

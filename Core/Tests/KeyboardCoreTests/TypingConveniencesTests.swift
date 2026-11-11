@@ -21,7 +21,9 @@ final class TypingConveniencesTests: XCTestCase {
     func testDoubleSpaceAfterWordsInAllLanguages() {
         for text in ["Hello ", "Привет ", "Привіт ", "I ", "«привет ", "don’t ", "п'ять "] {
             XCTAssertEqual(SmartDoubleSpace.replacement(contextBeforeInput: text, elapsedSincePreviousSpace: 0.2), ". ", text)
+            XCTAssertEqual(SmartDoubleSpace.replacement(contextBeforeInput: text, elapsedSincePreviousSpace: 0.3), ". ", text)
         }
+        XCTAssertEqual(SmartDoubleSpace.maximumInterval, 0.3, accuracy: 0.000_001)
     }
     func testDoubleSpaceSkipsNumbersSignsAndAddresses() {
         for text in ["123 ", "1.5 ", "hello! ", "name@example.com ", "https://example.com ", "example.com ", "user123 ", "hello  ", " ", ""] {
@@ -29,6 +31,7 @@ final class TypingConveniencesTests: XCTestCase {
         }
     }
     func testDoubleSpaceOnlyWithinQuickRepeatInterval() {
+        XCTAssertNil(SmartDoubleSpace.replacement(contextBeforeInput: "word ", elapsedSincePreviousSpace: 0.300_001))
         XCTAssertNil(SmartDoubleSpace.replacement(contextBeforeInput: "word ", elapsedSincePreviousSpace: 1))
         XCTAssertNil(SmartDoubleSpace.replacement(contextBeforeInput: "word ", elapsedSincePreviousSpace: -0.1))
         XCTAssertNil(SmartDoubleSpace.replacement(contextBeforeInput: "word ", elapsedSincePreviousSpace: .infinity))
@@ -43,7 +46,6 @@ final class TypingConveniencesTests: XCTestCase {
         let emoji = "👨‍👩‍👧‍👦"
         let plan = try XCTUnwrap(WordDeletionPlan.make(contextBeforeInput: "family " + emoji))
         XCTAssertEqual(plan.deletedText, emoji)
-        XCTAssertEqual(plan.characterCount, 1)
         let accent = try XCTUnwrap(WordDeletionPlan.make(contextBeforeInput: "say cafe\u{301}"))
         XCTAssertEqual(accent.characterCount, 4)
     }

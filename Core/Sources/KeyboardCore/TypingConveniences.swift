@@ -1,10 +1,12 @@
 import Foundation
 
 public enum SmartDoubleSpace {
+    public static let maximumInterval: TimeInterval = 0.3
+
     /// Caller verifies that the preceding space was inserted by this keyboard
     /// at the same document/cursor. Replace that one space with the result.
     public static func replacement(contextBeforeInput context: String, elapsedSincePreviousSpace elapsed: TimeInterval) -> String? {
-        guard elapsed.isFinite, elapsed >= 0, elapsed <= 0.7,
+        guard elapsed.isFinite, elapsed >= 0, elapsed <= maximumInterval,
               context.hasSuffix(" "), !context.hasSuffix("  ") else { return nil }
         let text = String(context.dropLast())
         guard let last = text.last, last.isLetter else { return nil }

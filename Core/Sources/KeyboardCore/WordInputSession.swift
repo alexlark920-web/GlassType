@@ -19,8 +19,8 @@ public struct InputContextSnapshot: Equatable {
     }
 }
 
-/// Owns only the most recently inserted word and its automatic trailing space.
-/// Manual spaces and unrelated text are never trimmed by this record.
+/// Tracks an automatically committed word and its trailing space. The record
+/// remains valid only while the host cursor/document still matches the commit.
 public struct CompletedWordInsertion {
     public enum Origin: Equatable { case glide, suggestion }
     public let origin: Origin
@@ -33,9 +33,15 @@ public struct CompletedWordInsertion {
         self.origin = origin; self.insertedText = insertedText; self.context = context
     }
     public func matches(_ current: InputContextSnapshot) -> Bool { context.matches(current) }
+
+    /// Candidate/glide commits include an automatic trailing space. Backspace
+    /// should use its ordinary one-character deletion first, which removes only
+    /// that space; it must not atomically erase the committed word.
     public func deletionCount(in current: InputContextSnapshot) -> Int? {
-        origin == .glide && matches(current) ? insertedText.count : nil
+        guard matches(current), insertedText.hasSuffix(" ") else { return nil }
+        return nil
     }
+
     public func spaceDeletionCount(before punctuation: String, in current: InputContextSnapshot) -> Int {
         let closing = ".,!?:;…)]}»”%"
         return punctuation.count == 1 && punctuation.first.map({ closing.contains($0) }) == true && matches(current) ? 1 : 0
