@@ -19,6 +19,32 @@ public struct Candidate: Sendable, Equatable {
     }
 }
 
+/// Shared generation counter allowing a newly emitted touch to invalidate a frame
+/// even while the decoder actor is synchronously traversing the mapped trie.
+private final class GlideFrameEpoch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64 = 0
+
+    func advance() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        value &+= 1
+        return value
+    }
+
+    func isCurrent(_ expected: UInt64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value == expected
+    }
+
+    func invalidate() {
+        lock.lock()
+        value &+= 1
+        lock.unlock()
+    }
+}
+
 /// Serializes glide decoding and continuous streaming beam search away from the UI executor.
 /// Complies with Swift 6 strict concurrency, frame budgets (<=8ms for 120Hz), and cancellation.
 public actor GlideDecoderActor {
@@ -85,15 +111,24 @@ public actor GlideDecoderActor {
         resetBeam()
     }
 
-    // MARK: - Single Frame Processing (Zero-Allocation Hot Path)
+    // MARK: - Single Frame Processing
 
-    /// Processes a single touch frame in <= 5ms on this background actor.
-    /// Immediately drops work when Task.isCancelled is set.
+    /// Processes a touch frame on this background actor. Cancellation is checked during beam expansion.
     public func processTouchFrame(point: CGPoint, timestamp: TimeInterval) throws -> [Candidate] {
+        try processTouchFrame(point: point, timestamp: timestamp, epoch: nil, expectedEpoch: 0)
+    }
+
+    private func processTouchFrame(
+        point: CGPoint,
+        timestamp: TimeInterval,
+        epoch: GlideFrameEpoch?,
+        expectedEpoch: UInt64
+    ) throws -> [Candidate] {
         try Task.checkCancellation()
+        guard epoch.map({ $0.isCurrent(expectedEpoch) }) ?? true else { throw CancellationError() }
         guard let spatial = spatialModel, let lex = lexicon else { return [] }
 
-        // Enforce frame budget throttling (target interval <= 8ms for 120Hz)
+        // Enforce frame budget throttling (target interval <= 8ms for 120Hz).
         if lastProcessedTimestamp > 0, timestamp - lastProcessedTimestamp < frameInterval {
             let dx = point.x - lastProcessedPoint.x, dy = point.y - lastProcessedPoint.y
             if dx * dx + dy * dy < 16.0 {
@@ -110,20 +145,18 @@ public actor GlideDecoderActor {
         }
         guard candidateCount > 0 else { return currentTopCandidates(limit: 5) }
 
-        try Task.checkCancellation()
-
+        try checkFrame(epoch, expectedEpoch)
         var nextBeam: [BeamPath] = []
         nextBeam.reserveCapacity(beamWidth * 4)
 
         if activeBeam.isEmpty {
-            // First touch: spawn initial beam paths from Trie root
+            // First touch: spawn initial beam paths from Trie root.
             let root = lex.rootNode()
             for i in 0..<candidateCount {
-                try Task.checkCancellation()
+                try checkFrame(epoch, expectedEpoch)
                 let idx = Int(candidateBuffer[i].keyIndex)
                 guard spatial.keys.indices.contains(idx) else { continue }
                 let keyLoc = spatial.keys[idx]
-
                 if let transition = lex.transition(from: root, utf8: keyLoc.utf8Bytes, length: keyLoc.utf8Length) {
                     nextBeam.append(BeamPath(
                         node: transition.node,
@@ -136,12 +169,13 @@ public actor GlideDecoderActor {
                 }
             }
         } else {
-            // Successive touch: expand existing paths with transition or dwell
+            // Successive touch: expand existing paths with transition or dwell.
             for path in activeBeam {
-                try Task.checkCancellation()
+                try checkFrame(epoch, expectedEpoch)
 
-                // 1. Dwell on current key (if finger is dwelling/hovering over same key)
+                // Dwell on current key (finger dwelling/hovering over the same key).
                 for i in 0..<candidateCount {
+                    try checkFrame(epoch, expectedEpoch)
                     let idx = Int(candidateBuffer[i].keyIndex)
                     if spatial.keys.indices.contains(idx), spatial.keys[idx].key == path.lastKey {
                         nextBeam.append(BeamPath(
@@ -156,14 +190,13 @@ public actor GlideDecoderActor {
                     }
                 }
 
-                // 2. Transition to new neighboring key
+                // Transition to a new key through the memory-mapped trie.
                 for i in 0..<candidateCount {
-                    try Task.checkCancellation()
+                    try checkFrame(epoch, expectedEpoch)
                     let idx = Int(candidateBuffer[i].keyIndex)
                     guard spatial.keys.indices.contains(idx) else { continue }
                     let keyLoc = spatial.keys[idx]
                     guard keyLoc.key != path.lastKey else { continue }
-
                     if let transition = lex.transition(from: path.node, utf8: keyLoc.utf8Bytes, length: keyLoc.utf8Length) {
                         nextBeam.append(BeamPath(
                             node: transition.node,
@@ -178,21 +211,24 @@ public actor GlideDecoderActor {
             }
         }
 
-        try Task.checkCancellation()
-
-        // Prune down to Top-K (K=16) using normalized spatial scores
+        try checkFrame(epoch, expectedEpoch)
+        // Prune to Top-K using normalized spatial scores.
         nextBeam.sort {
             let leftNorm = $0.cumulativeSpatialScore / Float(max(1, $0.length))
             let rightNorm = $1.cumulativeSpatialScore / Float(max(1, $1.length))
             return leftNorm > rightNorm
         }
-
         if nextBeam.count > beamWidth {
             nextBeam.removeSubrange(beamWidth..<nextBeam.count)
         }
-        self.activeBeam = nextBeam
-
+        activeBeam = nextBeam
+        try checkFrame(epoch, expectedEpoch)
         return currentTopCandidates(limit: 5)
+    }
+
+    private func checkFrame(_ epoch: GlideFrameEpoch?, _ expectedEpoch: UInt64) throws {
+        try Task.checkCancellation()
+        guard epoch.map({ $0.isCurrent(expectedEpoch) }) ?? true else { throw CancellationError() }
     }
 
     /// Computes fused scores for the current beam and returns top candidates.
@@ -200,7 +236,6 @@ public actor GlideDecoderActor {
         guard !activeBeam.isEmpty else { return [] }
         let words = activeBeam.map(\.word)
         let ranks = OfflineLexicon.frequencyIndices(words: words, language: activeLanguage)
-
         var scored: [Candidate] = []
         scored.reserveCapacity(activeBeam.count)
 
@@ -209,7 +244,6 @@ public actor GlideDecoderActor {
             let rank = extraVocabulary.contains(path.word) ? 0 : (ranks[OfflineLexicon.normalized(path.word)] ?? 50_000)
             let logFreq = -log(Float(rank + 10))
             let finalScore = (wSpatial * normSpatial) + (wFreq * logFreq)
-
             scored.append(Candidate(
                 word: path.word,
                 score: finalScore,
@@ -219,18 +253,17 @@ public actor GlideDecoderActor {
             ))
         }
 
-        // Terminal words receive preference, followed by highest fused score
         scored.sort {
             if $0.isTerminal != $1.isTerminal { return $0.isTerminal && !$1.isTerminal }
             return $0.score > $1.score
         }
-
         return Array(scored.prefix(max(1, limit)))
     }
 
     // MARK: - Continuous Streaming Pipeline (AsyncStream)
 
     /// Creates an active streaming pipeline receiving touch points and yielding candidate lists.
+    /// A newer push invalidates an in-flight older frame before it waits for the decoder actor.
     public func streamCandidates(
         keyCenters: [String: CGPoint],
         language: KeyboardLanguage,
@@ -240,38 +273,49 @@ public actor GlideDecoderActor {
         wFreq: Float = 0.35,
         frameInterval: TimeInterval = 0.008
     ) -> (stream: AsyncStream<[Candidate]>, pushPoint: @Sendable (CGPoint, TimeInterval) async -> Void, finish: @Sendable () async -> Void) {
+        // Configure synchronously on the actor before returning push closures. This avoids
+        // the prior race where an unstructured setup Task could run after the first touch.
+        try? configure(
+            keyCenters: keyCenters,
+            language: language,
+            extraWords: extraWords,
+            beamWidth: beamWidth,
+            wSpatial: wSpatial,
+            wFreq: wFreq,
+            frameInterval: frameInterval
+        )
+
         var continuation: AsyncStream<[Candidate]>.Continuation?
-        let stream = AsyncStream<[Candidate]> { cont in
-            continuation = cont
+        let stream = AsyncStream<[Candidate]> { continuation = $0 }
+        guard let output = continuation else {
+            return (stream, { _, _ in }, {})
         }
+        let epoch = GlideFrameEpoch()
 
         let push: @Sendable (CGPoint, TimeInterval) async -> Void = { [weak self] point, timestamp in
             guard let self else { return }
+            let generation = epoch.advance()
             do {
-                let candidates = try await self.processTouchFrame(point: point, timestamp: timestamp)
-                continuation?.yield(candidates)
+                let candidates = try await self.processTouchFrame(
+                    point: point,
+                    timestamp: timestamp,
+                    epoch: epoch,
+                    expectedEpoch: generation
+                )
+                guard epoch.isCurrent(generation) else { return }
+                output.yield(candidates)
             } catch is CancellationError {
-                // Drop stale frame
-            } catch {}
+                // A stale frame was superseded by a newer touch event.
+            } catch {
+                // A failed frame must not terminate the continuous input stream.
+            }
         }
 
         let finish: @Sendable () async -> Void = { [weak self] in
+            epoch.invalidate()
             await self?.resetBeam()
-            continuation?.finish()
+            output.finish()
         }
-
-        Task {
-            try? await self.configure(
-                keyCenters: keyCenters,
-                language: language,
-                extraWords: extraWords,
-                beamWidth: beamWidth,
-                wSpatial: wSpatial,
-                wFreq: wFreq,
-                frameInterval: frameInterval
-            )
-        }
-
         return (stream, push, finish)
     }
 
@@ -308,9 +352,7 @@ public actor GlideDecoderActor {
                     continuation.finish()
                 }
             }
-            continuation.onTermination = { _ in
-                task.cancel()
-            }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
