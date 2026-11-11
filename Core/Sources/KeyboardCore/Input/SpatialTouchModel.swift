@@ -35,6 +35,16 @@ public struct SpatialTouchModel: Sendable {
         public init(key: String, centerPoint: CGPoint) {
             self.init(key: key, center: SIMD2<Float>(Float(centerPoint.x), Float(centerPoint.y)))
         }
+
+        public static func == (lhs: KeyLocation, rhs: KeyLocation) -> Bool {
+            lhs.key == rhs.key
+                && lhs.center == rhs.center
+                && lhs.utf8Bytes.0 == rhs.utf8Bytes.0
+                && lhs.utf8Bytes.1 == rhs.utf8Bytes.1
+                && lhs.utf8Bytes.2 == rhs.utf8Bytes.2
+                && lhs.utf8Bytes.3 == rhs.utf8Bytes.3
+                && lhs.utf8Length == rhs.utf8Length
+        }
     }
 
     /// Fixed-size candidate slot for zero-allocation candidate gathering.
