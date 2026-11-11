@@ -148,7 +148,7 @@ public enum OfflineLexicon {
                     if let tab = (start..<wordEnd).first(where: { bytes[$0] == 9 }) { wordEnd = tab }
                     if wordEnd - start >= prefixBytes.count,
                        prefixBytes.withUnsafeBufferPointer({ buffer in
-                           UnsafeBufferPointer(start: bytes + start, count: buffer.count).starts(with: buffer)
+                            UnsafeBufferPointer(start: bytes + start, count: buffer.count).starts(with: buffer)
                        }) {
                         let word = String(decoding: UnsafeBufferPointer(start: bytes + start, count: wordEnd - start), as: UTF8.self)
                         if OfflineLexicon.normalized(word) != key,
@@ -336,7 +336,8 @@ public enum OfflineLexicon {
         }.prefix(min(16, limit)))
     }
 
-    private static func normalized(_ word: String) -> String {
+    // Shared within KeyboardCore so the glide decoder can query normalized ranks.
+    static func normalized(_ word: String) -> String {
         word.precomposedStringWithCanonicalMapping.lowercased()
             .replacingOccurrences(of: "’", with: "'")
             .replacingOccurrences(of: "ʼ", with: "'")
