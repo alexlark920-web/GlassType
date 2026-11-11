@@ -62,9 +62,11 @@ public struct TouchRecognizer {
         let y = Double(point.y) / Double(geometry.pitch.height) - Double(offset.y)
         let sx = safeSigmaX, sy = safeSigmaY
         let weight = configuration.languageWeight.isFinite ? min(0.35, max(0, configuration.languageWeight)) : 0
+        let selectedIsNumberRow = geometry.hasNumberRow && geometry.keys[cell].row == 0
         var first = Score(), second = Score(), third = Score(), geometricTotal = 0.0, total = 0.0
         for key in geometry.keys {
             guard let character = key.role.character else { continue }
+            if geometry.hasNumberRow && ((key.row == 0) != selectedIsNumberRow) { continue }
             let dx = (x - Double(key.center.x / geometry.pitch.width)) / sx
             let dy = (y - Double(key.center.y / geometry.pitch.height)) / sy
             let distance = dx * dx + dy * dy
@@ -126,6 +128,7 @@ public struct TouchRecognizer {
             var polygon = rectangle(geometry.bounds)
             let p = center(key)
             for other in geometry.keys where other.index != key.index && other.role.character != nil {
+                if geometry.hasNumberRow && ((key.row == 0) != (other.row == 0)) { continue }
                 let q = center(other)
                 let a = 2 * Double(q.x - p.x) / (scaleX * scaleX)
                 let b = 2 * Double(q.y - p.y) / (scaleY * scaleY)
@@ -134,6 +137,7 @@ public struct TouchRecognizer {
                 if polygon.isEmpty { break }
             }
             for cell in geometry.keys where cell.role.character != nil {
+                if geometry.hasNumberRow && ((key.row == 0) != (cell.row == 0)) { continue }
                 var part = clip(polygon, a: -1, b: 0, c: -Double(cell.touchFrame.minX))
                 part = clip(part, a: 1, b: 0, c: Double(cell.touchFrame.maxX))
                 part = clip(part, a: 0, b: -1, c: -Double(cell.touchFrame.minY))

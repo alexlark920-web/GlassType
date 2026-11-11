@@ -7,6 +7,7 @@ final class KeyboardTouchSurface: UIView {
     var language: KeyboardLanguage = .english
     var symbolPage: SymbolPage?
     var customRows: [[String]]?
+    var numberRow = false
     var thirdRowUsesModeSwitch = false
     var compact = true
     var visualWidthScale: CGFloat = 1 {
@@ -74,7 +75,8 @@ final class KeyboardTouchSurface: UIView {
         previousBounds = bounds
         let geometry = KeyboardGeometry.make(bounds: bounds, language: language, symbolPage: symbolPage,
                                               compact: compact, needsSystemKey: needsSystemKey,
-                                              customRows: customRows, thirdRowUsesModeSwitch: thirdRowUsesModeSwitch,
+                                              customRows: customRows, numberRow: numberRow,
+                                              thirdRowUsesModeSwitch: thirdRowUsesModeSwitch,
                                               visualWidthScale: visualWidthScale)
         guard geometry.keys.count == keyViews.count else { recognizer = nil; return }
         recognizer = TouchRecognizer(geometry: geometry, configuration: configuration)

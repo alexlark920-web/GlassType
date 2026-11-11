@@ -8,8 +8,8 @@ public enum KeyboardKeyRole: Equatable {
     public var character: String? { if case let .character(value) = self { return value }; return nil }
 }
 
-/// User-adjustable sizing stays inside ranges that keep the four-row grid
-/// inside the extension's self-sizing surface. Width changes affect the visible
+/// User-adjustable sizing stays inside ranges that keep the key grid inside
+/// the extension's self-sizing surface. Width changes affect the visible
 /// caps only; every key keeps its original non-overlapping touch slot.
 public enum KeyboardSizing {
     public static func heightScale(_ value: Double) -> Double {
@@ -41,26 +41,30 @@ public struct KeyboardGeometry {
     public let language: KeyboardLanguage
     public let keys: [KeyboardKeyGeometry]
     public let pitch: CGSize
+    public let hasNumberRow: Bool
 
     public static func make(bounds: CGRect, language: KeyboardLanguage,
                             symbolPage: SymbolPage? = nil, compact: Bool = true,
                             needsSystemKey: Bool = false, customRows: [[String]]? = nil,
+                            numberRow: Bool = false,
                             thirdRowUsesModeSwitch: Bool = false,
                             visualWidthScale: CGFloat = 1) -> KeyboardGeometry {
         guard [bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height].allSatisfy({ $0.isFinite }),
               bounds.width >= 80, bounds.height >= 80 else {
-            return KeyboardGeometry(bounds: .zero, language: language, keys: [], pitch: .zero)
+            return KeyboardGeometry(bounds: .zero, language: language, keys: [], pitch: .zero, hasNumberRow: false)
         }
         let rows = customRows ?? symbolPage?.rows ?? language.rows
+        let showsNumberRow = numberRow && symbolPage == nil && customRows == nil
         guard rows.count == 3, rows.allSatisfy({ !$0.isEmpty }) else {
-            return KeyboardGeometry(bounds: .zero, language: language, keys: [], pitch: .zero)
+            return KeyboardGeometry(bounds: .zero, language: language, keys: [], pitch: .zero, hasNumberRow: false)
         }
-        let columns = max(rows[0].count, max(rows[1].count, rows[2].count + 2))
+        let columns = max(showsNumberRow ? 10 : 0, max(rows[0].count, max(rows[1].count, rows[2].count + 2)))
+        let rowCount = 4 + (showsNumberRow ? 1 : 0)
         let margin: CGFloat = 4, bottomMargin: CGFloat = 5
         let contentWidth = bounds.width - margin * 2
-        let height = (bounds.height - bottomMargin) / 4
+        let height = (bounds.height - bottomMargin) / CGFloat(rowCount)
         var result: [KeyboardKeyGeometry] = []
-        result.reserveCapacity(rows.reduce(0) { $0 + $1.count } + 9)
+        result.reserveCapacity(rows.reduce(0) { $0 + $1.count } + 9 + (showsNumberRow ? 10 : 0))
         func appendRow(_ roles: [KeyboardKeyRole], weights: [CGFloat], row: Int) {
             let total = weights.reduce(0, +)
             let scale = contentWidth / total
@@ -79,20 +83,27 @@ public struct KeyboardGeometry {
                                     width: visualWidth, height: baseVisual.height)
                 result.append(KeyboardKeyGeometry(index: result.count, row: row, role: roles[position], slotFrame: slot,
                     visualFrame: visual,
-                    touchFrame: CGRect(x: touchLeft, y: slot.minY, width: touchRight - touchLeft, height: height + (row == 3 ? bottomMargin : 0))))
+                    touchFrame: CGRect(x: touchLeft, y: slot.minY, width: touchRight - touchLeft,
+                                       height: height + (row == rowCount - 1 ? bottomMargin : 0))))
                 x = end
             }
+        }
+        let rowOffset = showsNumberRow ? 1 : 0
+        if showsNumberRow {
+            appendRow(Array("1234567890").map { String($0) },
+                      weights: Array(repeating: 1, count: 10), row: 0)
         }
         for row in 0..<3 {
             let characters = rows[row].map(KeyboardKeyRole.character)
             if row == 2 {
                 let functionWeight = CGFloat(columns - rows[row].count) / 2
                 appendRow([thirdRowUsesModeSwitch ? .modeSwitch : .shift] + characters + [.backspace],
-                          weights: [functionWeight] + Array(repeating: 1, count: characters.count) + [functionWeight], row: row)
+                          weights: [functionWeight] + Array(repeating: 1, count: characters.count) + [functionWeight],
+                          row: row + rowOffset)
             } else {
                 // Each alphabet row fills the same horizontal span. Layouts
                 // with fewer keys distribute the extra width across those keys.
-                appendRow(characters, weights: Array(repeating: 1, count: characters.count), row: row)
+                appendRow(characters, weights: Array(repeating: 1, count: characters.count), row: row + rowOffset)
             }
         }
         var bottom: [KeyboardKeyRole] = [.modeSwitch, .language]
@@ -100,9 +111,10 @@ public struct KeyboardGeometry {
         if needsSystemKey { bottom.append(.systemKeyboard); weights.append(0.85) }
         bottom += [.character(","), .space, .character("."), .enter]
         weights += [0.85, 3.6, 0.85, 1.35]
-        appendRow(bottom, weights: weights, row: 3)
+        appendRow(bottom, weights: weights, row: 3 + rowOffset)
         return KeyboardGeometry(bounds: bounds, language: language, keys: result,
-                                pitch: CGSize(width: contentWidth / CGFloat(columns), height: height))
+                                pitch: CGSize(width: contentWidth / CGFloat(columns), height: height),
+                                hasNumberRow: showsNumberRow)
     }
 
     /// Half-open cells have one owner, including exact shared edges. The outer
@@ -110,13 +122,7 @@ public struct KeyboardGeometry {
     public func cellIndex(at point: CGPoint) -> Int? {
         guard point.x.isFinite, point.y.isFinite, point.x >= bounds.minX, point.x <= bounds.maxX,
               point.y >= bounds.minY, point.y <= bounds.maxY, !keys.isEmpty else { return nil }
-        // Compare the same stored boundary expressions used by layout. Division
-        // can turn an exact row edge into 2.9999999999999996 on fractional sizes.
-        let row: Int
-        if point.y < bounds.minY + pitch.height { row = 0 }
-        else if point.y < bounds.minY + 2 * pitch.height { row = 1 }
-        else if point.y < bounds.minY + 3 * pitch.height { row = 2 }
-        else { row = 3 }
+        guard let row = keys.last(where: { point.y >= $0.slotFrame.minY })?.row else { return nil }
         for index in keys.indices where keys[index].row == row {
             let next = index + 1
             // The next cell's start is the canonical shared edge; reconstructing

@@ -21,6 +21,46 @@ final class KeyboardGeometryTests: XCTestCase {
         XCTAssertTrue(KeyboardGeometry.make(bounds: bounds, language: .russian, customRows: [["x"]]).keys.isEmpty)
         XCTAssertFalse(KeyboardGeometry.make(bounds: bounds, language: .russian).keys.isEmpty)
     }
+    func testOptionalNumberRowAddsDigitKeysAboveLettersAndKeepsHitTestingAligned() {
+        let bounds = CGRect(x: 0, y: 0, width: 390, height: 260)
+        let geometry = KeyboardGeometry.make(bounds: bounds, language: .english, numberRow: true)
+        let digits = geometry.keys.filter { $0.row == 0 }
+
+        XCTAssertEqual(digits.compactMap(\.role.character), Array("1234567890").map { String($0) })
+        XCTAssertEqual(geometry.keys.filter { $0.row == 1 }.compactMap(\.role.character), KeyboardLanguage.english.rows[0])
+        XCTAssertEqual(geometry.keys.filter { $0.row == 4 }.last?.role, .enter)
+        for key in geometry.keys {
+            XCTAssertEqual(geometry.cellIndex(at: key.center), key.index)
+        }
+    }
+
+    func testNumberRowDoesNotChangeSymbolOrCustomLayouts() {
+        let bounds = CGRect(x: 0, y: 0, width: 390, height: 260)
+        let symbolPage = KeyboardGeometry.make(bounds: bounds, language: .english, symbolPage: .numbers)
+        let requestedSymbolPage = KeyboardGeometry.make(bounds: bounds, language: .english,
+                                                        symbolPage: .numbers, numberRow: true)
+        let customRows = [["🙂", "😀"], ["🐶", "🐱"], ["👍", "❤️"]]
+        let custom = KeyboardGeometry.make(bounds: bounds, language: .english, customRows: customRows)
+        let requestedCustom = KeyboardGeometry.make(bounds: bounds, language: .english,
+                                                    customRows: customRows, numberRow: true)
+
+        XCTAssertEqual(requestedSymbolPage.keys.map(\.slotFrame), symbolPage.keys.map(\.slotFrame))
+        XCTAssertEqual(requestedCustom.keys.map(\.slotFrame), custom.keys.map(\.slotFrame))
+    }
+    func testNumberRowCapsAndTouchCellsStayInsideCommonKeyboardSizes() {
+        for size in sizes {
+            for language in KeyboardLanguage.allCases {
+                let geometry = KeyboardGeometry.make(bounds: CGRect(origin: .zero, size: size),
+                                                     language: language, numberRow: true)
+                XCTAssertTrue(geometry.hasNumberRow)
+                for key in geometry.keys {
+                    XCTAssertTrue(geometry.bounds.contains(key.slotFrame))
+                    XCTAssertTrue(key.slotFrame.contains(key.visualFrame))
+                    XCTAssertEqual(geometry.cellIndex(at: key.center), key.index)
+                }
+            }
+        }
+    }
     private let sizes: [CGSize] = [CGSize(width: 312, height: 220), CGSize(width: 367, height: 225),
         CGSize(width: 385, height: 225), CGSize(width: 393, height: 229.7), CGSize(width: 422, height: 240), CGSize(width: 732, height: 155),
         CGSize(width: 734, height: 155), CGSize(width: 750, height: 155), CGSize(width: 844, height: 165)]

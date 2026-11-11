@@ -445,6 +445,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private let rows = UIStackView()
     private let keyPlane = KeyboardTouchSurface(frame: .zero)
     private var touchAdaptation = TouchCalibrationStorage.load()
+    private var telemetry = KeyboardTelemetryRecorder()
     private var pendingCalibrationSamples = 0
     private let lexiconQueue = DispatchQueue(label: "GlassType.lexicon", qos: .userInitiated)
     private struct GlideRequest: Sendable {
@@ -453,7 +454,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         let language: KeyboardLanguage
     }
     private enum DeferredInput {
-        case text(String), backspace(Bool), deleteWord, shift, symbols, emoji, language(LanguageDirection), glide(GlideRequest), suggestion(String, String)
+        case text(String), backspace(Bool), deleteWord, shift, symbols, emoji, language(LanguageDirection), glide(GlideRequest), suggestion(String, String, Int)
     }
     private var pendingInput = PendingInputSequence<DeferredInput>()
     private var drainingInput = false
@@ -593,7 +594,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         super.viewWillAppear(animated); reloadSettings(); updateContext()
     }
     override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated); flushTouchCalibration(); cancelGlide(); hideKeyPreview(); spaceButton?.cancelInteraction(); stopDeleting(); dismissPopup(); hideSettingsPanel(); feedback = nil; correctionUndo = nil; suppressedCorrection = nil
+        super.viewWillDisappear(animated); flushTouchCalibration(); telemetry.flush(); cancelGlide(); hideKeyPreview(); spaceButton?.cancelInteraction(); stopDeleting(); dismissPopup(); hideSettingsPanel(); feedback = nil; correctionUndo = nil; suppressedCorrection = nil
     }
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
@@ -620,7 +621,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         guard view.bounds.width > 0 else { return }
         let landscape = view.window?.windowScene?.interfaceOrientation.isLandscape ?? false
         let base: CGFloat = landscape ? (settings.compactKeys ? 188 : 202) : (settings.compactKeys ? 254 : 278)
-        let desired = KeyboardSizing.height(base: base * 1.05, scale: settings.keyboardHeightScale,
+        let numberRowHeight = settings.showNumberRow && !state.symbols && !state.emoji ? base / 4 : 0
+        let desired = KeyboardSizing.height(base: (base + numberRowHeight) * 1.05, scale: settings.keyboardHeightScale,
                                             hasToolbar: needsToolbar, bottomInset: view.safeAreaInsets.bottom)
         if heightConstraint?.constant != desired { heightConstraint?.constant = desired }
     }
@@ -631,6 +633,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     override func selectionDidChange(_ textInput: UITextInput?) { invalidatePendingInput(); cancelCursorIfDocumentChanged(); invalidateSpaceSnapshot(); dismissPopup(); invalidateCorrectionUndo(); updateContext() }
     private func reloadSettings() {
         settings = KeyboardSettings.loadKeyboard(fullAccess: hasFullAccess)
+        telemetry.configure(enabled: settings.telemetryEnabled && hasFullAccess)
         personalLexiconRepository = hasFullAccess ? (personalLexiconRepository ?? (try? PersonalLexiconRepository())) : nil
         refreshLearnedWords()
         let profileStore = predictionProfile
@@ -707,6 +710,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
         keyPlane.language = state.language; keyPlane.symbolPage = state.symbols ? state.symbolPage : nil
         keyPlane.customRows = nil
+        keyPlane.numberRow = settings.showNumberRow && !state.symbols
         keyPlane.thirdRowUsesModeSwitch = false
         keyPlane.compact = settings.compactKeys; keyPlane.needsSystemKey = needsInputModeSwitchKey
         keyPlane.visualWidthScale = CGFloat(settings.visualKeyWidthScale)
@@ -717,6 +721,14 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 key.learningMaximumDuration = settings.holdDelay
             }
             keyPlane.keyViews.append(button); keyPlane.addKey(button)
+        }
+        if keyPlane.numberRow {
+            for digit in Array("1234567890").map { String($0) } {
+                let button = makeButton(digit)
+                button.accessibilityLabel = digit
+                configureTextAction(button, text: digit)
+                attach(button)
+            }
         }
         let keyRows = state.symbols ? state.symbolPage.rows : state.language.rows
         for (index, keys) in keyRows.enumerated() {
@@ -977,7 +989,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
     private func configureTextAction(_ button: UIButton, text: String) {
         (button as? TextKeyButton)?.textValue = text
-        (button as? TextKeyButton)?.commit = { [weak self] value in self?.insert(value) }
+        (button as? TextKeyButton)?.commit = { [weak self] value in
+            guard let self else { return }
+            self.insert(value)
+            self.telemetry.recordTextKeyCommit()
+        }
     }
     private func configureButton(_ button: KeyButton, title: String) {
         button.compact = settings.compactKeys
@@ -1065,7 +1081,11 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
     }
     private func flushTouchCalibration() {
-        if pendingCalibrationSamples > 0 { TouchCalibrationStorage.save(touchAdaptation); pendingCalibrationSamples = 0 }
+        if pendingCalibrationSamples > 0 {
+            TouchCalibrationStorage.save(touchAdaptation)
+            telemetry.recordTouchAdaptation(touchAdaptation)
+            pendingCalibrationSamples = 0
+        }
     }
     private func resetTouchCalibration() {
         touchAdaptation = .init(); pendingCalibrationSamples = 0; TouchCalibrationStorage.reset(); applyTouchConfiguration()
@@ -1263,6 +1283,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
               !dictionaryCheck.known else { return }
         settings.personalLexicon.addKnownWord(word)
         settings.saveKeyboardOverrides()
+        telemetry.recordDictionaryWordAdded()
         suggestionSignature = nil
         refreshSuggestions()
     }
@@ -1330,7 +1351,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 12), stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -12), stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 8), stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -12), stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -24)])
         func action(_ title: String, _ handler: @escaping () -> Void) {
             let button = UIButton(type: .system); button.setTitle(title, for: .normal); button.tintColor = theme.foreground
-            button.titleLabel?.numberOfLines = 2; button.titleLabel?.font = .systemFont(ofSize: 14)
+            button.titleLabel?.numberOfLines = 2; button.titleLabel?.lineBreakMode = .byWordWrapping
+            button.titleLabel?.font = .systemFont(ofSize: 14); button.titleLabel?.textAlignment = .center
+            button.clipsToBounds = true
             button.addAction(UIAction { _ in handler() }, for: .touchUpInside); stack.addArrangedSubview(button)
         }
         action(localized("Готово")) { [weak self] in self?.rebuild(); self?.updateContext() }
@@ -1389,7 +1412,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 case .emoji: toggleEmojiKeyboard()
                 case .language(let direction): cycleLanguage(direction)
                 case .glide(let request): decodeGlide(request)
-                case .suggestion(let word, let prefix): accept(word, prefix: prefix)
+                case .suggestion(let word, let prefix, let rank): accept(word, prefix: prefix, rank: rank)
                 }
             }
         }
@@ -1480,6 +1503,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }
     }
     private func commitGlide(_ decoded: [String], context: InputContextSnapshot) {
+        telemetry.recordGlideAttempt()
         guard let best = decoded.first else {
             clear(suggestions); suggestionSignature = "glide-miss"
             let label = UILabel(); label.text = localized("Нет совпадений"); label.textColor = .secondaryLabel
@@ -1492,6 +1516,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         correctionUndo = nil; suppressedCorrection = nil
         let text = prefix + inserted + " "
         textDocumentProxy.insertText(text)
+        telemetry.recordGlideWordInserted()
         learnWord(best, after: context.before ?? "", language: state.language)
         completedWord = CompletedWordInsertion(origin: .glide, insertedText: text, context: inputContext)
         glideWords = decoded.map { word in inserted == inserted.uppercased() ? word.uppercased() : (inserted.first?.isUppercase == true ? word.capitalized : word) }
@@ -1561,6 +1586,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         guard !pendingInput.isBusy else { return }
         guard glideWords.indices.contains(index), let undo = glideUndo, undoMatches(undo) else { glideWords = []; glideUndo = nil; updateContext(); return }
         let word = glideWords[index]
+        telemetry.recordGlideAlternativeAccepted(rank: index)
         let prefix = completedWord?.insertedText.hasPrefix(" ") == true ? " " : ""
         let previousContext = undo.contextBeforeReplacement() ?? ""
         for _ in (undo.replacement + " ") { textDocumentProxy.deleteBackward() }
@@ -1699,6 +1725,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         correctionUndo = nil
         for _ in word { textDocumentProxy.deleteBackward() }
         textDocumentProxy.insertText(replacement + delimiter)
+        telemetry.recordAutocorrectionApplied()
         _ = state.inserted(delimiter)
         learnWord(replacement, after: String(context.dropLast(word.count)), language: state.language)
         if let before = textDocumentProxy.documentContextBeforeInput, before.hasSuffix(replacement + delimiter) {
@@ -1831,6 +1858,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             correctionUndo = nil
             for _ in (undo.replacement + undo.delimiter) { textDocumentProxy.deleteBackward() }
             textDocumentProxy.insertText(undo.original)
+            telemetry.recordAutocorrectionUndone()
             suppressedCorrection = undo.original
         } else {
             correctionUndo = nil; suppressedCorrection = nil
@@ -1908,6 +1936,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         suggestions.isUserInteractionEnabled = false
         predictionQueue.async { [weak self] in
             guard let self, !request.isCancelled else { return }
+            let predictionStartedAt = ProcessInfo.processInfo.systemUptime
             let profile = shouldUsePersonalization ? self.predictionProfile.snapshot() : PersonalNGramModel()
             let result: PredictionResult
             if suggestionsEnabled && !isSecure {
@@ -1938,6 +1967,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                 return shift == .locked || (result.prefix.allSatisfy(\.isUppercase) && result.prefix.count > 1)
                     ? candidate.uppercased() : candidate.capitalized
             }
+            let predictionLatency = (ProcessInfo.processInfo.systemUptime - predictionStartedAt) * 1_000
             guard !request.isCancelled else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, !request.isCancelled, self.predictionGeneration == generation else { return }
@@ -1951,6 +1981,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
                     return
                 }
                 self.pendingPredictionRequest = nil
+                self.telemetry.recordPredictionLatency(milliseconds: predictionLatency)
                 self.renderStandardSuggestions(words, prefix: result.prefix, language: language,
                                                canOfferSave: canOfferSave)
             }
@@ -1965,6 +1996,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         guard suggestionSignature != signature else { return }
         suggestionSignature = signature
         clear(suggestions)
+        if !words.isEmpty || canOfferSave {
+            telemetry.recordSuggestionSet(candidateCount: words.count, nextWord: prefix.isEmpty)
+        }
         for index in words.indices {
             let button = makeSuggestionButton(words[index]); button.titleLabel?.font = .systemFont(ofSize: 16)
             button.addAction(UIAction { [weak self] _ in self?.acceptSuggestion(at: index) }, for: .touchUpInside)
@@ -1973,31 +2007,43 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if canOfferSave {
             let button = makeAddAsTypedButton(prefix)
             button.addAction(UIAction { [weak self] _ in self?.saveCurrentWordToPersonalDictionary(prefix) }, for: .touchUpInside)
-            suggestions.addArrangedSubview(button)
+            let cell = UIView(); cell.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(button)
+            NSLayoutConstraint.activate([
+                button.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+                button.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                button.topAnchor.constraint(equalTo: cell.topAnchor, constant: 2),
+                button.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -2)
+            ])
+            suggestions.addArrangedSubview(cell)
         }
     }
     private func makeAddAsTypedButton(_ word: String) -> UIButton {
         let button = makeSuggestionButton(word)
         button.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
+        button.titleLabel?.numberOfLines = 1
+        button.titleLabel?.adjustsFontSizeToFitWidth = true
+        button.titleLabel?.minimumScaleFactor = 0.75
         button.backgroundColor = theme.key.withAlphaComponent(0.58)
         button.layer.cornerRadius = 13
         button.layer.borderWidth = 0.5
         button.layer.borderColor = theme.foreground.withAlphaComponent(0.18).cgColor
+        button.clipsToBounds = true
         button.setImage(UIImage(systemName: "plus"), for: .normal)
         button.tintColor = theme.foreground.withAlphaComponent(0.82)
         button.semanticContentAttribute = .forceLeftToRight
-        button.imageEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 5)
-        button.contentEdgeInsets = UIEdgeInsets(top: 5, left: 10, bottom: 5, right: 10)
+        button.imageEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 4)
+        button.contentEdgeInsets = UIEdgeInsets(top: 3, left: 5, bottom: 3, right: 5)
         button.accessibilityLabel = localized("Добавить слово в словарь как есть") + " «" + word + "»"
         button.accessibilityHint = localized("Слово будет сохранено только на этом устройстве")
         return button
     }
     private func acceptSuggestion(at index: Int) {
         guard suggestionWords.indices.contains(index), let prefix = pendingPrefix else { return }
-        accept(suggestionWords[index], prefix: prefix)
+        accept(suggestionWords[index], prefix: prefix, rank: index)
     }
-    private func accept(_ word: String, prefix: String) {
-        if pendingInput.deferIfBusy(.suggestion(word, prefix)) { return }
+    private func accept(_ word: String, prefix: String, rank: Int) {
+        if pendingInput.deferIfBusy(.suggestion(word, prefix, rank)) { return }
         // Recheck host context: a selection or cursor move invalidates the candidate.
         guard pendingPrefix == prefix,
               let context = SuggestionAcceptanceContext.precedingContext(
@@ -2009,6 +2055,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         synchronizeCapitalization()
         let text = state.insertedWord(word) + " "
         textDocumentProxy.insertText(text)
+        telemetry.recordSuggestionAccepted(rank: rank, nextWord: prefix.isEmpty)
         learnWord(word, after: String(context.dropLast(prefix.count)), language: state.language)
         completedWord = CompletedWordInsertion(origin: .suggestion, insertedText: text, context: inputContext)
         updateContext()

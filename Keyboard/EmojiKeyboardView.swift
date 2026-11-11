@@ -249,7 +249,7 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
 
     private func showVariantPopover(for item: EmojiItem, from cell: UICollectionViewCell) {
         let choices = EmojiVariants.choices(for: item.emoji, among: allItems)
-        guard choices.count > 1 else { return }
+        guard choices.count > 1, bounds.width >= 64, bounds.height >= 52 else { return }
         variantPopover?.removeFromSuperview()
         let panel = UIView(); panel.translatesAutoresizingMaskIntoConstraints = false
         panel.backgroundColor = theme.key.withAlphaComponent(0.97)
@@ -288,13 +288,14 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
         }
         panel.addSubview(title); panel.addSubview(scroll); addSubview(panel); variantPopover = panel
         let center = cell.convert(CGPoint(x: cell.bounds.midX, y: cell.bounds.midY), to: self)
-        let panelWidth = min(bounds.width - 16, max(196, CGFloat(choices.count) * 49 + 16))
-        let left = min(max(8, center.x - panelWidth / 2), bounds.width - panelWidth - 8)
-        let top = max(4, center.y - 78)
+        let panelWidth = min(max(0, bounds.width - 16), max(196, CGFloat(choices.count) * 49 + 16))
+        let panelHeight = min(82, max(0, bounds.height - 8))
+        let left = min(max(8, center.x - panelWidth / 2), max(8, bounds.width - panelWidth - 8))
+        let top = min(max(4, center.y - 78), max(4, bounds.height - panelHeight - 4))
         NSLayoutConstraint.activate([
             panel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: left),
             panel.topAnchor.constraint(equalTo: topAnchor, constant: top), panel.widthAnchor.constraint(equalToConstant: panelWidth),
-            panel.heightAnchor.constraint(equalToConstant: 82),
+            panel.heightAnchor.constraint(equalToConstant: panelHeight),
             title.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 10), title.topAnchor.constraint(equalTo: panel.topAnchor, constant: 6),
             scroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 2), scroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -2),
             scroll.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 2), scroll.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -4)

@@ -28,6 +28,17 @@ final class TouchRecognitionTests: XCTestCase {
         XCTAssertEqual(model.resolve(CGPoint(x: point.x - 0.001, y: point.y))?.first.keyIndex, left.index)
         XCTAssertEqual(model.resolve(CGPoint(x: point.x + 0.001, y: point.y))?.first.keyIndex, right.index)
     }
+    func testNumberRowDigitsDoNotCompeteWithLettersAcrossRowBoundary() {
+        let geometry = KeyboardGeometry.make(bounds: CGRect(x: 0, y: 0, width: 390, height: 260),
+                                             language: .english, numberRow: true)
+        let digit = geometry.keys.first { $0.row == 0 }!
+        let firstLetter = geometry.keys.first { $0.row == 1 }!
+        let point = CGPoint(x: digit.center.x, y: firstLetter.slotFrame.minY)
+
+        XCTAssertEqual(digit.center.x, firstLetter.center.x, accuracy: 0.001)
+        XCTAssertEqual(geometry.keys[geometry.cellIndex(at: point)!].row, 1)
+        XCTAssertEqual(TouchRecognizer(geometry: geometry).resolve(point)?.first.keyIndex, firstLetter.index)
+    }
     func testVisualGapsHaveNoDeadZonesOrConflictingOwners() {
         let geometry = layout(.russian), model = TouchRecognizer(geometry: layout(.russian))
         for y in stride(from: CGFloat(0), through: geometry.bounds.height, by: 3) {
@@ -76,20 +87,27 @@ final class TouchRecognitionTests: XCTestCase {
         XCTAssertNil(model.resolve(CGPoint(x: 10, y: 226)))
     }
     func testDebugPolygonsMatchActualResolver() {
-        var model = TouchRecognizer(geometry: layout(.ukrainian))
-        model.configuration.offsetX = 0.12; model.configuration.offsetY = -0.08
-        let zones = model.debugZones()
-        XCTAssertFalse(zones.isEmpty)
-        var area: CGFloat = 0
-        for zone in zones where zone.polygon.count >= 3 {
-            let points = zone.polygon
-            let signedArea = zip(points, Array(points.dropFirst()) + [points[0]]).reduce(CGFloat(0)) { $0 + $1.0.x * $1.1.y - $1.1.x * $1.0.y } / 2
-            guard abs(signedArea) > 0.0001 else { continue }
-            area += abs(signedArea)
-            let center = CGPoint(x: points.map(\.x).reduce(0, +) / CGFloat(points.count), y: points.map(\.y).reduce(0, +) / CGFloat(points.count))
-            XCTAssertEqual(model.resolve(center)?.first.keyIndex, zone.keyIndex)
+        let geometries = [
+            layout(.ukrainian),
+            KeyboardGeometry.make(bounds: CGRect(x: 0, y: 0, width: 385, height: 225),
+                                  language: .ukrainian, numberRow: true)
+        ]
+        for geometry in geometries {
+            var model = TouchRecognizer(geometry: geometry)
+            model.configuration.offsetX = 0.12; model.configuration.offsetY = -0.08
+            let zones = model.debugZones()
+            XCTAssertFalse(zones.isEmpty)
+            var area: CGFloat = 0
+            for zone in zones where zone.polygon.count >= 3 {
+                let points = zone.polygon
+                let signedArea = zip(points, Array(points.dropFirst()) + [points[0]]).reduce(CGFloat(0)) { $0 + $1.0.x * $1.1.y - $1.1.x * $1.0.y } / 2
+                guard abs(signedArea) > 0.0001 else { continue }
+                area += abs(signedArea)
+                let center = CGPoint(x: points.map(\.x).reduce(0, +) / CGFloat(points.count), y: points.map(\.y).reduce(0, +) / CGFloat(points.count))
+                XCTAssertEqual(model.resolve(center)?.first.keyIndex, zone.keyIndex)
+            }
+            XCTAssertEqual(area, model.geometry.bounds.width * model.geometry.bounds.height, accuracy: 0.01)
         }
-        XCTAssertEqual(area, model.geometry.bounds.width * model.geometry.bounds.height, accuracy: 0.01)
     }
     func testRapidTypingWorkload() {
         let geometry = layout(.russian), model = TouchRecognizer(geometry: layout(.russian))

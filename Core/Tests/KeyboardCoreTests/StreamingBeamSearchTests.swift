@@ -118,7 +118,7 @@ final class StreamingBeamSearchTests: XCTestCase {
             CGPoint(x: 95, y: 80)
         ]
 
-        var candidates: [GlideDecoderActor.Candidate] = []
+        var candidates: [Candidate] = []
         for (index, point) in points.enumerated() {
             candidates = try await actor.processTouchFrame(point: point, timestamp: Double(index + 1) * 0.01)
             if !candidates.isEmpty {
