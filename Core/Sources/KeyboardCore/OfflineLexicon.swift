@@ -336,7 +336,7 @@ public enum OfflineLexicon {
         }.prefix(min(16, limit)))
     }
 
-    private static func normalized(_ word: String) -> String {
+    static func normalized(_ word: String) -> String {
         word.precomposedStringWithCanonicalMapping.lowercased()
             .replacingOccurrences(of: "’", with: "'")
             .replacingOccurrences(of: "ʼ", with: "'")
