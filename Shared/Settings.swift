@@ -16,6 +16,7 @@ enum HapticChoice: String, CaseIterable {
 struct KeyboardSettings {
     // Must match both entitlements after changing the bundle identifier prefix.
     static let group = "group.org.opentype.GlassType"
+    var usesSharedSettingsStorage = false
     var theme: ThemeChoice = .system
     var suggestions = true
     var autoCapitalization = true
@@ -111,6 +112,8 @@ struct KeyboardSettings {
     /// when the re-signed app cannot share an App Group with its extension.
     static func loadKeyboard(fullAccess: Bool) -> KeyboardSettings {
         var result = fullAccess ? load() : KeyboardSettings()
+        result.usesSharedSettingsStorage = fullAccess
+        guard !fullAccess else { return result }
         let defaults = UserDefaults.standard
         if let raw = defaults.string(forKey: overrideKeys[0]), let value = HapticChoice(rawValue: raw) { result.haptics = value }
         if let value = defaults.object(forKey: overrideKeys[1]) as? Bool { result.extraSymbols = value }
@@ -141,6 +144,10 @@ struct KeyboardSettings {
         return result
     }
     func saveKeyboardOverrides() {
+        if usesSharedSettingsStorage {
+            save()
+            return
+        }
         let defaults = UserDefaults.standard
         defaults.set(EnabledKeyboardLanguages.normalized(languages).map(\.rawValue), forKey: Self.overrideKeys[14])
         defaults.set(autoCapitalization, forKey: Self.overrideKeys[11])

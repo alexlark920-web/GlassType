@@ -129,6 +129,10 @@ final class StreamingBeamSearchTests: XCTestCase {
             }
         }
 
-        XCTAssertTrue(candidates.contains { $0.word.lowercased() == "help" || $0.word.lowercased() == "hello" || $0.word.lowercased() == "helo" }, "Candidates: \(candidates.map(\.word))")
+        let candidateWords = candidates.map { $0.word.lowercased() }
+        let hasExpectedCandidate = candidateWords.contains("help")
+            || candidateWords.contains("hello")
+            || candidateWords.contains("helo")
+        XCTAssertTrue(hasExpectedCandidate, "Candidates: \(candidateWords)")
     }
 }

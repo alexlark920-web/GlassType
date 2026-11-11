@@ -469,7 +469,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     private weak var emojiSearchLabel: UILabel?
     private var feedback: UIImpactFeedbackGenerator?
     private var settingsPanel: UIView?
-    private var languageSwitches: [KeyboardLanguage: UISwitch] = [:]
     private var popupStartX: CGFloat = 0
     private var popupInitialIndex = 0
     private let keyPreview = KeyPreviewPresenter()
@@ -594,7 +593,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         super.viewWillAppear(animated); reloadSettings(); updateContext()
     }
     override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated); flushTouchCalibration(); cancelGlide(); hideKeyPreview(); spaceButton?.cancelInteraction(); stopDeleting(); dismissPopup(); hideLocalSettings(); feedback = nil; correctionUndo = nil; suppressedCorrection = nil
+        super.viewWillDisappear(animated); flushTouchCalibration(); cancelGlide(); hideKeyPreview(); spaceButton?.cancelInteraction(); stopDeleting(); dismissPopup(); hideSettingsPanel(); feedback = nil; correctionUndo = nil; suppressedCorrection = nil
     }
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
@@ -679,7 +678,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         if preservingInput { resetGlidePresentation() } else { cancelGlide() }
         lastSpace = nil; glideWords = []; glideUndo = nil; deletionUndo = nil
         hideKeyPreview(); spaceButton?.cancelInteraction(); spaceButton = nil; symbolsButton = nil
-        stopDeleting(); dismissPopup(); hideLocalSettings(); clear(rows); clear(toolbar); clear(suggestions); letterButtons.removeAll(); shiftButton = nil; renderedShift = nil; renderedLetterCase = nil; emojiSearchLabel = nil
+        stopDeleting(); dismissPopup(); hideSettingsPanel(); clear(rows); clear(toolbar); clear(suggestions); letterButtons.removeAll(); shiftButton = nil; renderedShift = nil; renderedLetterCase = nil; emojiSearchLabel = nil
         suggestionSignature = nil; suggestionWords.removeAll(); correctionUndo = nil
         view.setNeedsLayout()
         suggestions.axis = .horizontal; suggestions.distribution = .fillEqually; suggestions.spacing = 6
@@ -768,7 +767,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         language.tintColor = theme.foreground
         language.accessibilityLabel = localized(settings.emojiKeyEnabled ? "Эмодзи" : "Сменить язык")
         language.accessibilityValue = settings.emojiKeyEnabled ? nil : state.language.title
-        language.accessibilityHint = localized("Удерживайте для настроек клавиатуры")
+        language.accessibilityHint = localized("Нажмите на шестерёнку или удерживайте для настроек приложения")
         language.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             if self.settings.emojiKeyEnabled { self.toggleEmojiKeyboard() } else { self.cycleLanguage(.next) }
@@ -778,17 +777,21 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         settingsPress.delaysTouchesBegan = false; settingsPress.delaysTouchesEnded = false
         language.addGestureRecognizer(settingsPress)
         language.accessibilityCustomActions = [
-            UIAccessibilityCustomAction(name: localized("Настройки клавиатуры")) { [weak self] _ in self?.showLocalSettings(); return true },
+            UIAccessibilityCustomAction(name: localized("Настройки приложения")) { [weak self] _ in self?.openAppSettings(); return true },
             UIAccessibilityCustomAction(name: localized("Предыдущий язык")) { [weak self] _ in self?.cycleLanguage(.previous); return true }
         ]
-        let gearHint = UIImageView(image: UIImage(systemName: "gearshape.fill"))
-        gearHint.tintColor = .secondaryLabel; gearHint.isUserInteractionEnabled = false
-        gearHint.isAccessibilityElement = false; gearHint.translatesAutoresizingMaskIntoConstraints = false
+        let gearHint = UIButton(type: .system)
+        gearHint.setImage(UIImage(systemName: "gearshape.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 9, weight: .semibold)), for: .normal)
+        gearHint.tintColor = .secondaryLabel
+        gearHint.accessibilityLabel = localized("Настройки приложения")
+        gearHint.accessibilityHint = localized("Открыть настройки в приложении GlassType")
+        gearHint.translatesAutoresizingMaskIntoConstraints = false
+        gearHint.addAction(UIAction { [weak self] _ in self?.openAppSettings() }, for: .touchUpInside)
         language.addSubview(gearHint)
         NSLayoutConstraint.activate([
-            gearHint.widthAnchor.constraint(equalToConstant: 9), gearHint.heightAnchor.constraint(equalToConstant: 9),
-            gearHint.topAnchor.constraint(equalTo: language.topAnchor, constant: 6),
-            gearHint.trailingAnchor.constraint(equalTo: language.trailingAnchor, constant: -6)
+            gearHint.widthAnchor.constraint(equalToConstant: 24), gearHint.heightAnchor.constraint(equalToConstant: 24),
+            gearHint.topAnchor.constraint(equalTo: language.topAnchor),
+            gearHint.trailingAnchor.constraint(equalTo: language.trailingAnchor)
         ])
         attach(language)
         if needsInputModeSwitchKey {
@@ -1116,368 +1119,27 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
             button.titleEdgeInsets = UIEdgeInsets(top: 5, left: 0, bottom: 0, right: 0)
         }
     }
-    private func hideLocalSettings() {
-        settingsPanel?.removeFromSuperview(); settingsPanel = nil; languageSwitches.removeAll(); rows.isHidden = false
+    private func hideSettingsPanel() {
+        settingsPanel?.removeFromSuperview(); settingsPanel = nil; rows.isHidden = false
     }
-    private func showLocalSettings() {
-        guard settingsPanel == nil else { return }
-        lexiconEditing = nil
-        cancelGlide(); hideKeyPreview(); spaceButton?.cancelInteraction(); stopDeleting(); dismissPopup()
 
-        // Keep the native keyboard material continuous behind the settings.
-        let panel = UIView(); panel.backgroundColor = .clear
-        panel.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(panel)
-        NSLayoutConstraint.activate([
-            panel.leadingAnchor.constraint(equalTo: view.leadingAnchor), panel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            panel.topAnchor.constraint(equalTo: view.topAnchor), panel.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-        let header = UIView(); header.backgroundColor = .clear
-        header.translatesAutoresizingMaskIntoConstraints = false; panel.addSubview(header)
-        let title = UILabel(); title.text = localized("Клавиатура")
-        title.font = .preferredFont(forTextStyle: .headline); title.adjustsFontForContentSizeCategory = true
-        title.adjustsFontSizeToFitWidth = true; title.minimumScaleFactor = 0.8
-        title.accessibilityTraits.insert(.header)
-        title.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(title)
-        let done = UIButton(type: .system); done.setTitle(localized("Готово"), for: .normal)
-        done.titleLabel?.font = .preferredFont(forTextStyle: .body)
-        done.titleLabel?.adjustsFontForContentSizeCategory = true
-        done.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(done)
-        done.addAction(UIAction { [weak self] _ in self?.rebuild() }, for: .touchUpInside)
-        NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: panel.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-            header.trailingAnchor.constraint(equalTo: panel.safeAreaLayoutGuide.trailingAnchor, constant: -12),
-            header.topAnchor.constraint(equalTo: panel.topAnchor), header.heightAnchor.constraint(equalToConstant: 44),
-            title.leadingAnchor.constraint(equalTo: header.leadingAnchor), title.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: done.leadingAnchor, constant: -8),
-            done.trailingAnchor.constraint(equalTo: header.trailingAnchor), done.topAnchor.constraint(equalTo: header.topAnchor),
-            done.bottomAnchor.constraint(equalTo: header.bottomAnchor), done.widthAnchor.constraint(greaterThanOrEqualToConstant: 68)
-        ])
-        let scroll = UIScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.alwaysBounceVertical = true; scroll.isDirectionalLockEnabled = true
-        scroll.contentInsetAdjustmentBehavior = .never
-        panel.addSubview(scroll)
-        NSLayoutConstraint.activate([
-            scroll.leadingAnchor.constraint(equalTo: panel.safeAreaLayoutGuide.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: panel.safeAreaLayoutGuide.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
-            scroll.bottomAnchor.constraint(equalTo: panel.safeAreaLayoutGuide.bottomAnchor)
-        ])
-        let content = UIStackView(); content.axis = .vertical; content.spacing = 8
-        content.translatesAutoresizingMaskIntoConstraints = false; scroll.addSubview(content)
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 12),
-            content.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -12),
-            content.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 8),
-            content.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -12),
-            content.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -24)
-        ])
-        func card(_ heading: String) -> UIStackView {
-            let caption = UILabel(); caption.text = localized(heading)
-            caption.font = .preferredFont(forTextStyle: .footnote); caption.textColor = .secondaryLabel
-            caption.adjustsFontForContentSizeCategory = true; caption.accessibilityTraits.insert(.header)
-            content.addArrangedSubview(caption)
-            let surface = UIView(); surface.backgroundColor = .tertiarySystemFill
-            surface.layer.cornerRadius = 13; surface.layer.cornerCurve = .continuous; surface.clipsToBounds = true
-            let group = UIStackView(); group.axis = .vertical; group.spacing = 0
-            group.translatesAutoresizingMaskIntoConstraints = false; surface.addSubview(group)
-            NSLayoutConstraint.activate([
-                group.leadingAnchor.constraint(equalTo: surface.leadingAnchor), group.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
-                group.topAnchor.constraint(equalTo: surface.topAnchor), group.bottomAnchor.constraint(equalTo: surface.bottomAnchor)
-            ])
-            content.addArrangedSubview(surface); content.setCustomSpacing(18, after: surface)
-            return group
+    private func openAppSettings() {
+        guard let url = URL(string: "glasstype://settings"), let extensionContext else {
+            UIAccessibility.post(notification: .announcement, argument: localized("Не удалось открыть приложение GlassType"))
+            return
         }
-        func append(_ item: UIView, to group: UIStackView) {
-            if !group.arrangedSubviews.isEmpty {
-                let separator = UIView(); separator.backgroundColor = .separator
-                separator.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
-                group.addArrangedSubview(separator)
-            }
-            group.addArrangedSubview(item)
-        }
-        @discardableResult
-        func toggle(_ text: String, value: Bool, group: UIStackView, change: @escaping (Bool) -> Void) -> UISwitch {
-            let title = localized(text)
-            let line = UIControl(); line.isAccessibilityElement = false
-            line.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-            let label = UILabel(); label.text = title; label.numberOfLines = 0
-            label.font = .preferredFont(forTextStyle: .body); label.adjustsFontForContentSizeCategory = true
-            label.isAccessibilityElement = false; label.translatesAutoresizingMaskIntoConstraints = false
-            line.addSubview(label)
-            // Default UISwitch styling lets the running iOS choose its own
-            // thumb, track, accessibility appearance and interaction.
-            let control = UISwitch(); control.isOn = value; control.accessibilityLabel = title
-            control.translatesAutoresizingMaskIntoConstraints = false; line.addSubview(control)
-            control.setContentCompressionResistancePriority(.required, for: .horizontal)
-            NSLayoutConstraint.activate([
-                label.leadingAnchor.constraint(equalTo: line.leadingAnchor, constant: 12),
-                label.topAnchor.constraint(equalTo: line.topAnchor, constant: 10),
-                label.bottomAnchor.constraint(equalTo: line.bottomAnchor, constant: -10),
-                label.trailingAnchor.constraint(equalTo: control.leadingAnchor, constant: -12),
-                control.trailingAnchor.constraint(equalTo: line.trailingAnchor, constant: -12),
-                control.centerYAnchor.constraint(equalTo: line.centerYAnchor)
-            ])
-            control.addAction(UIAction { [weak control] _ in
-                if let control { change(control.isOn) }
-            }, for: .valueChanged)
-            // Tapping the label also toggles; direct switch drags remain native.
-            line.addAction(UIAction { [weak control] _ in
-                guard let control, control.isEnabled else { return }
-                control.setOn(!control.isOn, animated: true); control.sendActions(for: .valueChanged)
-            }, for: .touchUpInside)
-            append(line, to: group)
-            return control
-        }
-        func segmented(_ text: String, control: UISegmentedControl, group: UIStackView) {
-            let title = localized(text)
-            let container = UIView()
-            let label = UILabel(); label.text = title; label.numberOfLines = 0
-            label.font = .preferredFont(forTextStyle: .body); label.adjustsFontForContentSizeCategory = true
-            label.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(label)
-            control.accessibilityLabel = title; control.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(control)
-            NSLayoutConstraint.activate([
-                label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-                label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-                label.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
-                control.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 8),
-                control.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-                control.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-                control.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
-                control.heightAnchor.constraint(greaterThanOrEqualToConstant: 36)
-            ])
-            append(container, to: group)
-        }
-        func slider(_ text: String, value: Double, lower: Double, upper: Double,
-                    valueText: @escaping (Double) -> String = { "\(Int(($0 * 100).rounded()))%" },
-                    group: UIStackView, change: @escaping (Double) -> Void) {
-            let container = UIView()
-            container.heightAnchor.constraint(greaterThanOrEqualToConstant: 64).isActive = true
-            let title = UILabel(); title.text = localized(text); title.numberOfLines = 2
-            title.font = .preferredFont(forTextStyle: .body); title.adjustsFontForContentSizeCategory = true
-            title.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(title)
-            let control = UISlider(); control.minimumValue = Float(lower); control.maximumValue = Float(upper)
-            control.value = Float(value); control.accessibilityLabel = localized(text)
-            control.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(control)
-            let valueLabel = UILabel(); valueLabel.textAlignment = .right
-            valueLabel.font = .preferredFont(forTextStyle: .footnote); valueLabel.textColor = .secondaryLabel
-            valueLabel.text = valueText(value)
-            valueLabel.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(valueLabel)
-            NSLayoutConstraint.activate([
-                title.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-                title.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-                title.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
-                control.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-                control.trailingAnchor.constraint(equalTo: valueLabel.leadingAnchor, constant: -10),
-                control.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 4),
-                control.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
-                valueLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-                valueLabel.centerYAnchor.constraint(equalTo: control.centerYAnchor),
-                valueLabel.widthAnchor.constraint(equalToConstant: 42)
-            ])
-            control.addAction(UIAction { [weak valueLabel, weak control] _ in
-                guard let control else { return }
-                let current = Double(control.value)
-                valueLabel?.text = valueText(current)
-                valueLabel?.accessibilityValue = valueLabel?.text
-                change(current)
-            }, for: .valueChanged)
-            append(container, to: group)
-        }
-
-        let typing = card("Ввод")
-        toggle("Автозамена", value: settings.autoCorrection, group: typing) { [weak self] value in
-            self?.settings.autoCorrection = value; self?.settings.saveKeyboardOverrides()
-        }
-        toggle("Разрешить нецензурные слова в подсказках и автозамене", value: settings.allowProfanitySuggestions, group: typing) { [weak self] value in
-            self?.settings.allowProfanitySuggestions = value; self?.settings.saveKeyboardOverrides(); self?.refreshSuggestions()
-        }
-        toggle("Заглавные в начале предложений", value: settings.autoCapitalization, group: typing) { [weak self] value in
-            self?.settings.autoCapitalization = value; self?.settings.saveKeyboardOverrides()
-        }
-        toggle("Двойной пробел → точка", value: settings.doubleSpacePeriod, group: typing) { [weak self] value in
-            self?.settings.doubleSpacePeriod = value; self?.settings.saveKeyboardOverrides()
-        }
-        toggle("Свайп удаления слова", value: settings.swipeDeleteWord, group: typing) { [weak self] value in
-            self?.settings.swipeDeleteWord = value; self?.settings.saveKeyboardOverrides()
-        }
-        toggle("Свайп-ввод слов · эксперимент", value: settings.glideTyping, group: typing) { [weak self] value in
-            self?.settings.glideTyping = value; self?.settings.saveKeyboardOverrides()
-        }
-        let prediction = card("Предиктивный ввод")
-        toggle("Предсказание следующего слова", value: settings.nextWordPrediction, group: prediction) { [weak self] value in
-            guard let self else { return }
-            self.settings.nextWordPrediction = value; self.settings.saveKeyboardOverrides(); self.refreshSuggestions()
-        }
-        toggle("Локальное обучение подсказок", value: settings.personalizationEnabled, group: prediction) { [weak self] value in
-            guard let self else { return }
-            self.settings.personalizationEnabled = value; self.settings.saveKeyboardOverrides(); self.refreshSuggestions()
-        }
-        let predictionNote = UILabel(); predictionNote.numberOfLines = 0
-        predictionNote.font = .preferredFont(forTextStyle: .footnote); predictionNote.textColor = .secondaryLabel
-        predictionNote.text = localized("Обучение хранит только короткие агрегированные счётчики локально. Сообщения, пароли и история набора не сохраняются; полный доступ не требуется.")
-        content.addArrangedSubview(predictionNote)
-        let resetPrediction = UIButton(type: .system)
-        resetPrediction.setTitle(localized("Сбросить адаптацию подсказок"), for: .normal)
-        resetPrediction.contentHorizontalAlignment = .leading
-        resetPrediction.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-        resetPrediction.addAction(UIAction { [weak self, weak resetPrediction] _ in
-            guard let self else { return }
-            self.predictionProfile.reset(); self.refreshSuggestions()
-            resetPrediction?.setTitle(self.localized("Адаптация подсказок сброшена"), for: .normal)
-        }, for: .touchUpInside)
-        append(resetPrediction, to: prediction)
-        let feedbackCard = card("Тактильный отклик")
-        let haptics = UISegmentedControl(items: HapticChoice.allCases.map { localized($0.title) })
-        haptics.selectedSegmentIndex = HapticChoice.allCases.firstIndex(of: settings.haptics) ?? 0
-        haptics.addAction(UIAction { [weak self, weak haptics] _ in
-            guard let self, let haptics, HapticChoice.allCases.indices.contains(haptics.selectedSegmentIndex) else { return }
-            self.settings.haptics = HapticChoice.allCases[haptics.selectedSegmentIndex]
-            self.settings.saveKeyboardOverrides(); self.configureFeedback(); self.performFeedback()
-        }, for: .valueChanged)
-        segmented("Сила виброотклика", control: haptics, group: feedbackCard)
-
-        let symbols = card("Дополнительные символы")
-        toggle("Символы удержанием", value: settings.extraSymbols, group: symbols) { [weak self] value in
-            self?.settings.extraSymbols = value; self?.settings.saveKeyboardOverrides()
-        }
-        toggle("Метки на клавишах", value: settings.symbolHints, group: symbols) { [weak self] value in
-            self?.settings.symbolHints = value; self?.settings.saveKeyboardOverrides()
-        }
-        let delay = UISegmentedControl(items: ["0,25 с", "0,4 с", "0,6 с"])
-        delay.selectedSegmentIndex = settings.holdDelay < 0.325 ? 0 : (settings.holdDelay < 0.5 ? 1 : 2)
-        delay.addAction(UIAction { [weak self, weak delay] _ in
-            guard let self, let delay, (0...2).contains(delay.selectedSegmentIndex) else { return }
-            self.settings.holdDelay = [0.25, 0.4, 0.6][delay.selectedSegmentIndex]; self.settings.saveKeyboardOverrides()
-        }, for: .valueChanged)
-        segmented("Задержка удержания", control: delay, group: symbols)
-
-        let appearance = card("Внешний вид")
-        toggle("Компактные клавиши", value: settings.compactKeys, group: appearance) { [weak self] value in
-            self?.settings.compactKeys = value; self?.settings.saveKeyboardOverrides()
-        }
-        slider("Высота клавиатуры", value: settings.keyboardHeightScale, lower: 0.92, upper: 1.10, group: appearance) { [weak self] value in
-            guard let self else { return }
-            self.settings.keyboardHeightScale = KeyboardSizing.heightScale(value)
-            self.settings.saveKeyboardOverrides(); self.applyKeyboardHeight()
-        }
-        slider("Визуальная ширина клавиш", value: settings.visualKeyWidthScale, lower: 0.84, upper: 1.12, group: appearance) { [weak self] value in
-            guard let self else { return }
-            self.settings.visualKeyWidthScale = KeyboardSizing.visualWidthScale(value)
-            self.settings.saveKeyboardOverrides()
-            self.keyPlane.visualWidthScale = CGFloat(self.settings.visualKeyWidthScale)
-            self.keyPlane.setNeedsLayout(); self.keyPlane.layoutIfNeeded()
-        }
-        slider("Затухание росчерка", value: settings.glideTrailFadeDuration, lower: 0.1, upper: 0.8,
-               valueText: { String(format: "%.2f с", $0) }, group: appearance) { [weak self] value in
-            guard let self else { return }
-            self.settings.glideTrailFadeDuration = KeyboardSettings.clampedGlideTrailFadeDuration(value)
-            self.settings.saveKeyboardOverrides()
-        }
-        slider("Толщина росчерка", value: settings.glideTrailWidth, lower: 2, upper: 10,
-               valueText: { "\(Int($0.rounded())) pt" }, group: appearance) { [weak self] value in
-            guard let self else { return }
-            self.settings.glideTrailWidth = KeyboardSettings.clampedGlideTrailWidth(value)
-            self.settings.saveKeyboardOverrides()
-        }
-        toggle("Отображение символа при нажатии", value: settings.showKeyPreview, group: appearance) { [weak self] value in
-            guard let self else { return }
-            self.settings.showKeyPreview = value; self.settings.saveKeyboardOverrides()
-            if !value { self.hideKeyPreview() }
-        }
-        toggle("Заменить глобус на эмодзи", value: settings.emojiKeyEnabled, group: appearance) { [weak self] value in
-            self?.settings.emojiKeyEnabled = value; self?.settings.saveKeyboardOverrides()
-        }
-        let accuracy = card("Точность касаний")
-        toggle("Адаптация касаний", value: settings.touchAdaptationEnabled, group: accuracy) { [weak self] value in
-            guard let self else { return }
-            self.settings.touchAdaptationEnabled = value; self.settings.saveKeyboardOverrides(); self.applyTouchConfiguration()
-        }
-        toggle("Показать зоны касаний", value: settings.debugTouchZones, group: accuracy) { [weak self] value in
-            self?.settings.debugTouchZones = value; self?.settings.saveKeyboardOverrides(); self?.applyTouchConfiguration()
-        }
-        let calibrationNote = UILabel(); calibrationNote.numberOfLines = 0
-        calibrationNote.font = .preferredFont(forTextStyle: .footnote); calibrationNote.textColor = .secondaryLabel
-        calibrationNote.text = localized("Локальное обучение меняет центр и ширину зоны касания по обезличенным агрегатам. Буквы, сообщения, пароли и история координат не сохраняются. Сброс охватывает все ориентации.")
-        content.addArrangedSubview(calibrationNote)
-        let clearCalibration = UIButton(type: .system); clearCalibration.setTitle(localized("Сбросить адаптацию касаний"), for: .normal)
-        clearCalibration.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-        clearCalibration.addAction(UIAction { [weak self, weak clearCalibration] _ in
-            self?.resetTouchCalibration(); clearCalibration?.setTitle(self?.localized("Адаптация сброшена"), for: .normal)
-        }, for: .touchUpInside)
-        append(clearCalibration, to: accuracy)
-        let dictionaryCard = card("Личный словарь")
-        let dictionary = UIButton(type: .system)
-        var dictionaryStyle = UIButton.Configuration.plain()
-        dictionaryStyle.title = localized("Замены и исключения")
-        dictionaryStyle.image = UIImage(systemName: "chevron.forward")
-        dictionaryStyle.imagePlacement = .trailing; dictionaryStyle.imagePadding = 8
-        dictionaryStyle.baseForegroundColor = .label
-        dictionaryStyle.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12)
-        dictionary.configuration = dictionaryStyle; dictionary.contentHorizontalAlignment = .leading
-        dictionary.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-        dictionary.addAction(UIAction { [weak self] _ in self?.showLexiconPanel() }, for: .touchUpInside)
-        append(dictionary, to: dictionaryCard)
-
-        let note = UILabel(); note.numberOfLines = 0
-        note.font = .preferredFont(forTextStyle: .footnote); note.adjustsFontForContentSizeCategory = true
-        note.textColor = .secondaryLabel
-        note.text = localized("Изменения сохраняются сразу. «Готово» применяет оформление. Тактильный отклик зависит от iOS и устройства.")
-        content.addArrangedSubview(note)
-        let reset = UIButton(type: .system)
-        var resetStyle = UIButton.Configuration.plain()
-        resetStyle.title = localized("Сбросить локальные настройки"); resetStyle.baseForegroundColor = .systemRed
-        resetStyle.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)
-        reset.configuration = resetStyle; reset.titleLabel?.numberOfLines = 0
-        reset.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-        reset.addAction(UIAction { [weak self] _ in
-            KeyboardSettings.clearKeyboardOverrides(); self?.reloadSettings()
-        }, for: .touchUpInside)
-        content.addArrangedSubview(reset)
-        let preservation = UILabel(); preservation.text = localized("Личный словарь при сбросе сохранится.")
-        preservation.numberOfLines = 0; preservation.textColor = .secondaryLabel
-        preservation.font = .preferredFont(forTextStyle: .footnote); preservation.adjustsFontForContentSizeCategory = true
-        content.addArrangedSubview(preservation)
-
-        let languages = card("Языки ввода · минимум один")
-        for language in KeyboardLanguage.allCases {
-            languageSwitches[language] = toggle(language.title, value: settings.languages.contains(language), group: languages) { [weak self] enabled in
+        extensionContext.open(url) { [weak self] opened in
+            guard !opened else { return }
+            Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.settings.languages = EnabledKeyboardLanguages.setting(language, enabled: enabled, in: self.settings.languages)
-                self.settings.saveKeyboardOverrides()
-                if !self.settings.languages.contains(self.state.language), let first = self.settings.languages.first {
-                    self.state.language = first; KeyboardSettings.rememberLanguage(first); self.prewarmLexicon()
-                }
-                self.updateLanguageSwitches()
+                UIAccessibility.post(notification: .announcement, argument: self.localized("Не удалось открыть приложение GlassType"))
             }
-        }
-        updateLanguageSwitches()
-
-        let locale = card("Язык интерфейса")
-        let localeControl = UISegmentedControl(items: InterfaceLanguage.allCases.map(\.shortTitle))
-        localeControl.selectedSegmentIndex = InterfaceLanguage.allCases.firstIndex(of: settings.interfaceLanguage) ?? 0
-        localeControl.addAction(UIAction { [weak self, weak localeControl] _ in
-            guard let self, let localeControl, InterfaceLanguage.allCases.indices.contains(localeControl.selectedSegmentIndex) else { return }
-            self.settings.interfaceLanguage = InterfaceLanguage.allCases[localeControl.selectedSegmentIndex]
-            self.settings.saveKeyboardOverrides()
-        }, for: .valueChanged)
-        segmented("Язык интерфейса", control: localeControl, group: locale)
-
-        rows.isHidden = true; settingsPanel = panel
-        UIAccessibility.post(notification: .screenChanged, argument: done)
-    }
-
-    private func spaceTitle() -> String { "‹ " + state.language.title + " ›" }
-    private func updateLanguageSwitches() {
-        for (language, control) in languageSwitches {
-            let enabled = settings.languages.contains(language)
-            control.setOn(enabled, animated: true)
-            control.isEnabled = !enabled || settings.languages.count > 1
         }
     }
     @objc private func settingsHeld(_ gesture: UILongPressGestureRecognizer) {
-        if gesture.state == .began { performFeedback(); showLocalSettings() }
+        if gesture.state == .began { performFeedback(); openAppSettings() }
     }
+    private func spaceTitle() -> String { "‹ " + state.language.title + " ›" }
     private func handleSpaceAction(_ action: SpacebarInteraction.Action) {
         switch action {
         case .none: break
@@ -1639,7 +1301,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         updateContext()
     }
     private func beginLexiconEditing(_ field: LexiconField) {
-        hideLocalSettings(); draftSource = ""; draftValue = ""; lexiconEditing = field
+        hideSettingsPanel(); draftSource = ""; draftValue = ""; lexiconEditing = field
         state.symbols = false; state.emoji = false; rebuild(); updateContext()
     }
     private func finishLexiconEditing(cancelled: Bool) {
@@ -1658,7 +1320,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         lexiconEditing = nil; rebuild(); updateContext(); showLexiconPanel()
     }
     private func showLexiconPanel() {
-        cancelGlide(); hideLocalSettings(); hideKeyPreview(); spaceButton?.cancelInteraction(); stopDeleting()
+        cancelGlide(); hideSettingsPanel(); hideKeyPreview(); spaceButton?.cancelInteraction(); stopDeleting()
         let panel = UIView(); panel.backgroundColor = .clear; panel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(panel); settingsPanel = panel; rows.isHidden = true
         NSLayoutConstraint.activate([panel.leadingAnchor.constraint(equalTo: view.leadingAnchor), panel.trailingAnchor.constraint(equalTo: view.trailingAnchor), panel.topAnchor.constraint(equalTo: view.topAnchor), panel.bottomAnchor.constraint(equalTo: view.bottomAnchor)])
