@@ -162,7 +162,7 @@ public actor GlideDecoderActor {
                     let idx = Int(candidateBuffer[i].keyIndex)
                     guard spatial.keys.indices.contains(idx) else { continue }
                     let keyLoc = spatial.keys[idx]
-                    guard keyLoc.key != path.lastKey else { continue }
+                    
 
                     if let transition = lex.transition(from: path.node, utf8: keyLoc.utf8Bytes, length: keyLoc.utf8Length) {
                         nextBeam.append(BeamPath(
@@ -198,7 +198,7 @@ public actor GlideDecoderActor {
     /// Computes fused scores for the current beam and returns top candidates.
     private func currentTopCandidates(limit: Int) -> [Candidate] {
         guard !activeBeam.isEmpty else { return [] }
-        let words = activeBeam.map(\.word)
+        let words = activeBeam.filter(\.isTerminal).map(\.word)
         let ranks = OfflineLexicon.frequencyIndices(words: words, language: activeLanguage)
 
         var scored: [Candidate] = []
