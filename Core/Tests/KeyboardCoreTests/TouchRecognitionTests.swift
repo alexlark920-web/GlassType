@@ -39,6 +39,24 @@ final class TouchRecognitionTests: XCTestCase {
         XCTAssertEqual(geometry.keys[geometry.cellIndex(at: point)!].row, 1)
         XCTAssertEqual(TouchRecognizer(geometry: geometry).resolve(point)?.first.keyIndex, firstLetter.index)
     }
+    func testRussianAndUkrainianLettersResolveWithLearnedTouchBias() {
+        for language in [KeyboardLanguage.russian, .ukrainian] {
+            for numberRow in [false, true] {
+                let geometry = KeyboardGeometry.make(bounds: CGRect(x: 0, y: 0, width: 393, height: 260),
+                                                     language: language, numberRow: numberRow)
+                var model = TouchRecognizer(geometry: geometry)
+                model.configuration.offsetX = 0.12
+                model.configuration.offsetY = -0.08
+
+                for key in geometry.keys where key.role.character?.allSatisfy(\.isLetter) == true {
+                    let biasedTap = CGPoint(x: key.center.x + geometry.pitch.width * 0.12,
+                                            y: key.center.y - geometry.pitch.height * 0.08)
+                    XCTAssertEqual(model.resolve(biasedTap)?.first.keyIndex, key.index,
+                                   "\(language.rawValue) key \(key.role.character ?? "") numberRow=\(numberRow)")
+                }
+            }
+        }
+    }
     func testVisualGapsHaveNoDeadZonesOrConflictingOwners() {
         let geometry = layout(.russian), model = TouchRecognizer(geometry: layout(.russian))
         for y in stride(from: CGFloat(0), through: geometry.bounds.height, by: 3) {
