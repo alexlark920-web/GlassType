@@ -169,7 +169,9 @@ public actor GlideDecoderActor {
                 }
             }
         } else {
-            // Successive touch: expand existing paths with transition or dwell.
+            // Successive touch: retain a dwell path and also try a trie transition.
+            // The transition must be allowed even when the key is unchanged, since
+            // repeated letters (for example the two l's in "hello") are distinct strokes.
             for path in activeBeam {
                 try checkFrame(epoch, expectedEpoch)
 
@@ -190,13 +192,13 @@ public actor GlideDecoderActor {
                     }
                 }
 
-                // Transition to a new key through the memory-mapped trie.
+                // Transition to a new trie character. This intentionally includes the
+                // same key: consecutive same-letter strokes must advance the trie.
                 for i in 0..<candidateCount {
                     try checkFrame(epoch, expectedEpoch)
                     let idx = Int(candidateBuffer[i].keyIndex)
                     guard spatial.keys.indices.contains(idx) else { continue }
                     let keyLoc = spatial.keys[idx]
-                    guard keyLoc.key != path.lastKey else { continue }
                     if let transition = lex.transition(from: path.node, utf8: keyLoc.utf8Bytes, length: keyLoc.utf8Length) {
                         nextBeam.append(BeamPath(
                             node: transition.node,
