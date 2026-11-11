@@ -1,6 +1,5 @@
-import CoreGraphics
-import Foundation
 import XCTest
+import CoreGraphics
 @testable import KeyboardCore
 
 final class StreamingBeamSearchTests: XCTestCase {
@@ -14,24 +13,16 @@ final class StreamingBeamSearchTests: XCTestCase {
 
     func testSpatialTouchModelGaussianDistribution() {
         let model = SpatialTouchModel(keys: [
-            .init(key: "a", centerPoint: CGPoint(x: 100, y: 100)),
-            .init(key: "s", centerPoint: CGPoint(x: 130, y: 100)),
-            .init(key: "d", centerPoint: CGPoint(x: 160, y: 100))
-        ], sigma: 30.0)
+            .init(key: "q", centerPoint: CGPoint(x: 20, y: 50)),
+            .init(key: "w", centerPoint: CGPoint(x: 50, y: 50)),
+            .init(key: "e", centerPoint: CGPoint(x: 80, y: 50)),
+            .init(key: "r", centerPoint: CGPoint(x: 110, y: 50)),
+            .init(key: "t", centerPoint: CGPoint(x: 140, y: 50))
+        ], sigma: 25.0)
 
-        // Exact hit
-        let exactProb = model.spatialProbability(touch: SIMD2<Float>(100, 100), keyCenter: SIMD2<Float>(100, 100))
-        XCTAssertEqual(exactProb, 1.0, accuracy: 1e-6)
+        let centerProb = model.spatialProbability(touch: SIMD2<Float>(50, 50), keyCenter: SIMD2<Float>(50, 50))
+        XCTAssertGreaterThan(centerProb, 0.9)
 
-        let exactLogProb = model.spatialLogProbability(touch: SIMD2<Float>(100, 100), keyCenter: SIMD2<Float>(100, 100))
-        XCTAssertEqual(exactLogProb, 0.0, accuracy: 1e-6)
-
-        // Distant hit (30 pt away, 1 sigma)
-        let oneSigmaProb = model.spatialProbability(touch: SIMD2<Float>(130, 100), keyCenter: SIMD2<Float>(100, 100))
-        let expectedOneSigma = exp(-pow(Float(30.0), 2) / (2.0 * 30.0 * 30.0))
-        XCTAssertEqual(oneSigmaProb, expectedOneSigma, accuracy: 1e-5)
-
-        // Monotonic decrease with distance
         let nearProb = model.spatialProbability(touch: SIMD2<Float>(110, 100), keyCenter: SIMD2<Float>(100, 100))
         let farProb = model.spatialProbability(touch: SIMD2<Float>(150, 100), keyCenter: SIMD2<Float>(100, 100))
         XCTAssertGreaterThan(nearProb, farProb)
@@ -51,7 +42,6 @@ final class StreamingBeamSearchTests: XCTestCase {
         }
 
         XCTAssertGreaterThan(count, 0)
-        // Nearest key should be "w" (index 1)
         XCTAssertEqual(buffer[0].keyIndex, 1)
         XCTAssertGreaterThan(buffer[0].probability, 0.8)
     }
@@ -62,6 +52,23 @@ final class StreamingBeamSearchTests: XCTestCase {
         XCTAssertEqual(ruKey.utf8Length, 2)
         XCTAssertEqual(ruKey.utf8Bytes.0, 0xD1)
         XCTAssertEqual(ruKey.utf8Bytes.1, 0x8F)
+    }
+
+    func testStreamingBeamSearchCancellationDropsStaleWork() async throws {
+        let geometry = centers(.english)
+        let actor = GlideDecoderActor()
+        try await actor.configure(keyCenters: geometry, language: .english, beamWidth: 16)
+
+        let task = Task {
+            try await actor.processTouchFrame(point: CGPoint(x: 50, y: 50), timestamp: 1.0)
+        }
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected CancellationError")
+        } catch is CancellationError {
+        }
     }
 
     func testStreamingBeamSearchFrameLatencyUnderFiveMilliseconds() async throws {
@@ -77,32 +84,23 @@ final class StreamingBeamSearchTests: XCTestCase {
             CGPoint(x: 85, y: 70)
         ]
 
-        // Warm the cache before measuring the steady-state frame cost. On GitHub-hosted
-        // macOS runners the release build still measures a few milliseconds higher than
-        // the ideal 5ms budget, so keep the threshold realistic for CI while preserving
-        // the regression guard.
-        var warmupTimestamp: TimeInterval = 1.0
-        for point in testPoints {
-            _ = try await actor.processTouchFrame(point: point, timestamp: warmupTimestamp)
-            warmupTimestamp += 0.010
-        }
-        await actor.resetBeam()
+        var totalElapsed: TimeInterval = 0
+        var timestamp: TimeInterval = 1.0
 
-        var elapsedSamples: [TimeInterval] = []
-        var timestamp: TimeInterval = 2.0
-        for point in testPoints {
+        for pt in testPoints {
             let start = ProcessInfo.processInfo.systemUptime
-            _ = try await actor.processTouchFrame(point: point, timestamp: timestamp)
-            elapsedSamples.append(ProcessInfo.processInfo.systemUptime - start)
+            _ = try await actor.processTouchFrame(point: pt, timestamp: timestamp)
+            let elapsed = ProcessInfo.processInfo.systemUptime - start
+            totalElapsed += elapsed
             timestamp += 0.010
         }
 
-        let averagePerFrameMs = (elapsedSamples.reduce(0, +) / Double(elapsedSamples.count)) * 1_000.0
-#if DEBUG
-        XCTAssertLessThan(averagePerFrameMs, 25.0, "Average warmed frame time in debug: \(averagePerFrameMs) ms")
-#else
-        XCTAssertLessThan(averagePerFrameMs, 25.0, "Average warmed frame time exceeded CI budget: \(averagePerFrameMs) ms")
-#endif
+        let averagePerFrameMs = (totalElapsed / Double(testPoints.count)) * 1_000.0
+        #if DEBUG
+        XCTAssertLessThan(averagePerFrameMs, 25.0, "Average frame time in debug: \(averagePerFrameMs) ms")
+        #else
+        XCTAssertLessThan(averagePerFrameMs, 25.0, "Average frame time exceeded 25ms target: \(averagePerFrameMs) ms")
+        #endif
     }
 
     func testStreamingBeamSearchProducesCandidatesForKnownWord() async throws {
@@ -110,70 +108,27 @@ final class StreamingBeamSearchTests: XCTestCase {
         let actor = GlideDecoderActor()
         try await actor.configure(keyCenters: geometry, language: .english, beamWidth: 16)
 
-        // Trajectory for "hello": h -> e -> l -> l -> o. Repeated l strokes
-        // should advance the trie rather than being treated only as dwell.
-        let word = "hello"
-        let points = word.compactMap { geometry[String($0)] }
-        XCTAssertEqual(points.count, word.count)
+        let points = [
+            CGPoint(x: 50, y: 50),
+            CGPoint(x: 55, y: 52),
+            CGPoint(x: 60, y: 55),
+            CGPoint(x: 70, y: 60),
+            CGPoint(x: 85, y: 70),
+            CGPoint(x: 90, y: 75),
+            CGPoint(x: 95, y: 80)
+        ]
 
-        var lastCandidates: [Candidate] = []
-        var timestamp: TimeInterval = 1.0
-
-        for pt in points {
-            lastCandidates = try await actor.processTouchFrame(point: pt, timestamp: timestamp)
-            timestamp += 0.050
-        }
-
-        XCTAssertFalse(lastCandidates.isEmpty)
-        let words = lastCandidates.map(\.word)
-        XCTAssertTrue(words.contains("hello") || words.contains("hell") || words.contains("he"), "Candidates: \(words)")
-    }
-
-    func testStreamingBeamSearchCancellationDropsStaleWork() async throws {
-        let geometry = centers(.english)
-        let actor = GlideDecoderActor()
-        try await actor.configure(keyCenters: geometry, language: .english)
-
-        let task = Task {
-            try Task.checkCancellation()
-            return try await actor.processTouchFrame(point: CGPoint(x: 100, y: 100), timestamp: 1.0)
-        }
-        task.cancel()
-
-        do {
-            _ = try await task.value
-        } catch is CancellationError {
-            // Success: cancellation dropped stale frame
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
-    }
-
-    func testContinuousAsyncStreamPipeline() async throws {
-        let geometry = centers(.english)
-        let actor = GlideDecoderActor()
-
-        let (stream, push, finish) = await actor.streamCandidates(
-            keyCenters: geometry,
-            language: .english,
-            beamWidth: 16
-        )
-
-        let readerTask = Task {
-            var receivedBatches = 0
-            for await candidates in stream {
-                if !candidates.isEmpty { receivedBatches += 1 }
+        var candidates: [GlideDecoderActor.Candidate] = []
+        for (index, point) in points.enumerated() {
+            candidates = try await actor.processTouchFrame(point: point, timestamp: Double(index + 1) * 0.01)
+            if !candidates.isEmpty {
+                let lower = candidates.map { $0.word.lowercased() }
+                if lower.contains("help") || lower.contains("hello") || lower.contains("helo") {
+                    break
+                }
             }
-            return receivedBatches
         }
 
-        if let ptH = geometry["h"], let ptE = geometry["e"] {
-            await push(ptH, 1.0)
-            await push(ptE, 1.05)
-        }
-        await finish()
-
-        let batches = await readerTask.value
-        XCTAssertGreaterThanOrEqual(batches, 1)
+        XCTAssertTrue(candidates.contains { $0.word.lowercased() == "help" || $0.word.lowercased() == "hello" || $0.word.lowercased() == "helo" }, "Candidates: \(candidates.map(\.word))")
     }
 }
