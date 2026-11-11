@@ -240,7 +240,7 @@ public actor GlideDecoderActor {
         wFreq: Float = 0.35,
         frameInterval: TimeInterval = 0.008
     ) -> (stream: AsyncStream<[Candidate]>, pushPoint: @Sendable (CGPoint, TimeInterval) async -> Void, finish: @Sendable () async -> Void) {
-        let pair = AsyncStream<[Candidate]>.makeStream(bufferingPolicy: .bufferingNewest(1))         let continuation = pair.continuation         let stream = pair.stream
+        let pair = AsyncStream<[Candidate]>.makeStream(bufferingPolicy: .bufferingNewest(1)); let continuation = pair.continuation; let stream = pair.stream
 
         let push: @Sendable (CGPoint, TimeInterval) async -> Void = { [weak self] point, timestamp in
             guard let self else { return }
