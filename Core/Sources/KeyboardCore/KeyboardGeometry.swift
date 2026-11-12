@@ -90,7 +90,7 @@ public struct KeyboardGeometry {
         }
         let rowOffset = showsNumberRow ? 1 : 0
         if showsNumberRow {
-            appendRow(Array("1234567890").map { String($0) },
+            appendRow(Array("1234567890").map { KeyboardKeyRole.character(String($0)) },
                       weights: Array(repeating: 1, count: 10), row: 0)
         }
         for row in 0..<3 {
