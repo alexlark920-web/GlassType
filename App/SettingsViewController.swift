@@ -181,7 +181,7 @@ final class SettingsViewController: UITableViewController {
     @objc private func sizeChanged(_ control: UISlider) {
         let value = Double(control.value)
         if control.tag == 19 { settings.keyboardHeightScale = KeyboardSizing.heightScale(value) }
-        else if control.tag == 20 { settings.visualKeyWidthScale = KeyboardSizing.visualKeyWidthScale(value) }
+        else if control.tag == 20 { settings.visualKeyWidthScale = KeyboardSizing.visualWidthScale(value) }
         else if control.tag == 24 { settings.glideTrailFadeDuration = KeyboardSettings.clampedGlideTrailFadeDuration(value) }
         else if control.tag == 25 { settings.glideTrailWidth = KeyboardSettings.clampedGlideTrailWidth(value) }
         let display = sliderDisplayValue(control.value, row: control.tag)
