@@ -2,7 +2,7 @@ import Foundation
 
 /// Bounded online learner using sufficient statistics only: no key IDs, letters,
 /// timestamps, raw touch histories, surrounding text or document IDs are stored.
-public struct TouchOffsetStatistics: Codable, Equatable {
+public struct TouchOffsetStatistics: Codable, Equatable, Sendable {
     public private(set) var count = 0
     public private(set) var meanX = 0.0
     public private(set) var meanY = 0.0
@@ -54,7 +54,7 @@ public struct TouchOffsetStatistics: Codable, Equatable {
         varianceSumX <= 4096 && varianceSumY <= 4096
     }
 }
-public struct TouchAdaptationState: Codable, Equatable {
+public struct TouchAdaptationState: Codable, Equatable, Sendable {
     public private(set) var version = 1
     public var portrait = TouchOffsetStatistics()
     public var landscape = TouchOffsetStatistics()

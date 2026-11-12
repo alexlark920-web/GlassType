@@ -89,7 +89,8 @@ public struct TouchRecognizer {
             return TouchCandidate(keyIndex: value.index, geometricProbability: value.geometric / geometricTotal,
                                   languageProbability: value.language, probability: value.combined / total)
         }
-        return TouchResolution(first: candidate(first)!, second: candidate(second), third: candidate(third))
+        guard let winner = candidate(first) else { return nil }
+        return TouchResolution(first: winner, second: candidate(second), third: candidate(third))
     }
 
     /// Exact clipped Gaussian/Voronoi regions for the default geometry-only

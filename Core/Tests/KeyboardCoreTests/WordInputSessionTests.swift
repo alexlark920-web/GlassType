@@ -15,16 +15,38 @@ final class WordInputSessionTests: XCTestCase {
         for origin in [CompletedWordInsertion.Origin.glide, .suggestion] {
             let current = context("Привет ")
             let insertion = CompletedWordInsertion(origin: origin, insertedText: "Привет ", context: current)!
-            for mark in [".", ",", "!", "?", ":", ";", "…", "»", ")"] {
+            var ergonomics = TypingErgonomics()
+            _ = ergonomics.commitWord("Привет")
+            for mark in [".", ",", "!", "?", ":", ";"] {
                 var text = current.before!
-                for _ in 0..<insertion.spaceDeletionCount(before: mark, in: current) { text.removeLast() }
+                XCTAssertEqual(insertion.spaceDeletionCount(before: mark, in: current), 1)
+                text.removeLast(insertion.spaceDeletionCount(before: mark, in: current))
+                text += ergonomics.punctuationInsertion(for: mark)!
+                XCTAssertEqual(text, "Привет" + mark + " ")
+                XCTAssertTrue(ergonomics.isAutoSpaceActive)
+            }
+            for mark in ["…", "»", ")"] {
+                var text = current.before!
+                text.removeLast(insertion.spaceDeletionCount(before: mark, in: current))
                 text += mark
                 XCTAssertEqual(text, "Привет" + mark)
+                XCTAssertNil(ergonomics.punctuationInsertion(for: mark))
             }
             for value in [" ", "\n", "a", "1", "(", "", "!?", "👋"] {
                 XCTAssertEqual(insertion.spaceDeletionCount(before: value, in: current), 0)
+                XCTAssertNil(ergonomics.punctuationInsertion(for: value))
             }
         }
+    }
+
+    func testSingleBackspaceRemovesOnlyTheAutomaticSpace() {
+        var ergonomics = TypingErgonomics()
+        XCTAssertEqual(ergonomics.commitWord("hello"), "hello ")
+        XCTAssertTrue(ergonomics.isAutoSpaceActive)
+        XCTAssertTrue(ergonomics.consumeAutoSpace())
+        XCTAssertFalse(ergonomics.isAutoSpaceActive)
+        XCTAssertFalse(ergonomics.consumeAutoSpace())
+        XCTAssertNil(ergonomics.punctuationInsertion(for: "."))
     }
     func testManualSpacesAndCursorChangesInvalidateAutomaticTrimming() {
         let record = CompletedWordInsertion(origin: .glide, insertedText: "hello ", context: context("say hello ", after: "tail"))!
@@ -54,11 +76,13 @@ final class WordInputSessionTests: XCTestCase {
         XCTAssertTrue(sequence.finish(token: token, in: context("say ")))
         var text = "say hello "
         let record = CompletedWordInsertion(origin: .glide, insertedText: "hello ", context: context(text))!
+        var ergonomics = TypingErgonomics()
+        _ = ergonomics.commitWord("hello")
         let punctuation = sequence.next()!
         text.removeLast(record.spaceDeletionCount(before: punctuation, in: context(text)))
-        text += punctuation
+        text += ergonomics.punctuationInsertion(for: punctuation)!
         while let next = sequence.next() { text += next }
-        XCTAssertEqual(text, "say hello. N")
+        XCTAssertEqual(text, "say hello.  N")
         XCTAssertFalse(sequence.isBusy)
     }
     func testSecondStrokeCanWaitBehindTheFirstWithoutLosingLaterInput() {

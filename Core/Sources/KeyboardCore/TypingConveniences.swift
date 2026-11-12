@@ -1,5 +1,38 @@
 import Foundation
 
+/// Candidate and glide commits insert a trailing space that the next key can reclaim.
+public struct TypingErgonomics: Sendable, Equatable {
+    public static let punctuation: Set<Character> = [".", ",", "!", "?", ":", ";"]
+
+    public private(set) var isAutoSpaceActive = false
+
+    public init() {}
+
+    /// Word text followed by the automatic trailing space.
+    public mutating func commitWord(_ word: String) -> String {
+        isAutoSpaceActive = true
+        return word + " "
+    }
+
+    /// Punctuation typed while the automatic space is still at the caret.
+    /// The space is deleted first; the returned text is the mark plus a new space.
+    public func punctuationInsertion(for input: String) -> String? {
+        guard isAutoSpaceActive, input.count == 1, let mark = input.first, Self.punctuation.contains(mark) else { return nil }
+        return String(mark) + " "
+    }
+
+    public mutating func activateAutoSpace() { isAutoSpaceActive = true }
+
+    public mutating func clearAutoSpace() { isAutoSpaceActive = false }
+
+    /// A single backspace removes only the automatic space.
+    public mutating func consumeAutoSpace() -> Bool {
+        guard isAutoSpaceActive else { return false }
+        isAutoSpaceActive = false
+        return true
+    }
+}
+
 public enum SmartDoubleSpace {
     public static let maximumInterval: TimeInterval = 0.3
 
@@ -99,35 +132,37 @@ public struct TextDeletionUndo {
 }
 
 public enum SentenceCapitalization {
-    /// Capitalize after a completed sentence + separator, not inside decimals,
-    /// domains or identifiers. Nil means the host cannot supply safe context.
+    /// Shift follows only the last four characters: the start of the field,
+    /// a newline, or a sentence mark (`. `, `? `, `! `, or `…`). The rest of
+    /// `documentContextBeforeInput` is never scanned.
     public static func shouldCapitalize(contextBeforeInput context: String?) -> Bool {
         guard let context else { return false }
         if context.isEmpty { return true }
-        let bounded = context.suffix(161)
-        let suffix = String(bounded.suffix(160))
-        // Opening quotes, whitespace and a greeting emoji do not consume the
-        // first cased letter of a message. A number/identifier does.
-        if bounded.count <= 160 && !suffix.contains(where: { $0.isLetter || $0.isNumber }) { return true }
-        if suffix.last?.isNewline == true { return true }
-        let hasSeparator = suffix.last?.isWhitespace == true
-        let trimmed = suffix.reversed().drop(while: { $0.isWhitespace && !$0.isNewline })
-        guard let final = trimmed.first else { return true }
-        if final.isNewline { return true }
-        let closing = Set(")] }»”\"'’".filter { !$0.isWhitespace })
-        let characters = Array(trimmed.drop(while: { closing.contains($0) }))
-        guard let mark = characters.first, [".", "!", "?", "…"].contains(String(mark)) else { return false }
-        if mark == "." && !hasSeparator { return false }
-        let terminators = Set(".!?…")
-        let preceding = String(characters.drop(while: { terminators.contains($0) }).reversed())
-        let token = preceding.split(whereSeparator: { $0.isWhitespace }).last.map(String.init) ?? ""
-        if mark == "." {
-            if token.contains("@") || token.contains("://") { return false }
-            // Domain-looking dotted tokens differ from a number or version
-            // followed by a sentence-ending dot and a separator.
-            if token.contains("."), let tail = token.split(separator: ".").last,
-               !tail.isEmpty, tail.allSatisfy(\.isLetter) { return false }
+        let probe = context.suffix(5)
+        if probe.count < 5, !probe.contains(where: { $0.isLetter || $0.isNumber }) { return true }
+        let tail = probe.count > 4 ? probe.dropFirst() : Substring(probe)
+        if tail.last?.isNewline == true { return true }
+        var cursor = tail.endIndex
+        while cursor > tail.startIndex {
+            let previous = tail.index(before: cursor)
+            let character = tail[previous]
+            if character.isNewline { return true }
+            if !character.isWhitespace { break }
+            cursor = previous
         }
-        return true
+        let hasSeparator = tail.last?.isWhitespace == true && tail.last?.isNewline != true
+        let closers: Set<Character> = [")", "]", "»", "”", "\"", "'", "’"]
+        while cursor > tail.startIndex {
+            let previous = tail.index(before: cursor)
+            let character = tail[previous]
+            if closers.contains(character) { cursor = previous; continue }
+            break
+        }
+        guard cursor > tail.startIndex else { return false }
+        switch tail[tail.index(before: cursor)] {
+        case "!", "?", "…": return true
+        case ".": return hasSeparator
+        default: return false
+        }
     }
 }

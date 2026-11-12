@@ -61,6 +61,7 @@ final class KeyPreviewPresenter {
         isVisible = false
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        container.removeAllAnimations()
         container.isHidden = true
         container.opacity = 0
         CATransaction.commit()

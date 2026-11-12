@@ -12,7 +12,8 @@ public struct SpacebarInteraction {
         case moveCursor(Int)
     }
     public private(set) var phase: Phase = .idle
-    public static let holdDuration = 0.42
+    /// A still hold of 250ms becomes trackpad mode. Movement before that stays a swipe or a tap.
+    public static let holdDuration = 0.25
     public static let maximumSwipeDuration = 0.32
     public static let swipeDistance = 36.0
     public static let cursorStep = 8.0

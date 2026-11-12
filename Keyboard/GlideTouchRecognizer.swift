@@ -14,6 +14,7 @@ final class GlideTouchRecognizer: UIGestureRecognizer {
         super.init(target: target, action: action)
         cancelsTouchesInView = true
         delaysTouchesBegan = false; delaysTouchesEnded = false
+        points.reserveCapacity(384)
     }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         guard trackedTouch == nil, touches.count == 1, let touch = touches.first else {
@@ -22,15 +23,22 @@ final class GlideTouchRecognizer: UIGestureRecognizer {
         trackedTouch = touch
         startPoint = touch.location(in: coordinateView ?? view)
         pointThrottler.reset()
-        points = [startPoint]
+        points.removeAll(keepingCapacity: true)
+        points.append(startPoint)
         _ = pointThrottler.shouldAccept(startPoint, at: touch.timestamp)
     }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
         guard let touch = trackedTouch, touches.contains(touch), state != .failed, state != .cancelled else { return }
         var activates = false
-        for sample in event.coalescedTouches(for: touch) ?? [touch] {
-            let point = sample.location(in: coordinateView ?? view)
-            append(point, at: sample.timestamp)
+        if let samples = event.coalescedTouches(for: touch) {
+            for sample in samples {
+                let point = sample.location(in: coordinateView ?? view)
+                append(point, at: sample.timestamp)
+                if state == .possible, mayBegin?(startPoint, point) == true { activates = true }
+            }
+        } else {
+            let point = touch.location(in: coordinateView ?? view)
+            append(point, at: touch.timestamp)
             if state == .possible, mayBegin?(startPoint, point) == true { activates = true }
         }
         if state == .possible {
@@ -55,10 +63,22 @@ final class GlideTouchRecognizer: UIGestureRecognizer {
     }
     private func append(_ point: CGPoint, at timestamp: TimeInterval, force: Bool = false) {
         guard point.x.isFinite, point.y.isFinite else { return }
-        if let last = points.last, hypot(point.x - last.x, point.y - last.y) < 1 { return }
+        if let last = points.last {
+            let dx = point.x - last.x, dy = point.y - last.y
+            if dx * dx + dy * dy < 1 { return }
+        }
         guard force || pointThrottler.shouldAccept(point, at: timestamp) else { return }
         if force { _ = pointThrottler.shouldAccept(point, at: timestamp) }
-        if points.count >= 384 { points = points.enumerated().filter { $0.offset % 2 == 0 }.map(\.element) }
+        if points.count >= 384 {
+            var write = 0
+            var read = 0
+            while read < points.count {
+                points[write] = points[read]
+                write += 1
+                read += 2
+            }
+            points.removeSubrange(write..<points.count)
+        }
         points.append(point)
     }
 }

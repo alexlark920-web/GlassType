@@ -17,14 +17,20 @@ final class KeyboardTextService {
         self.spelling = spelling ?? SystemSpelling()
     }
 
+    func needsDictionary(for word: String, language: KeyboardLanguage, personalLexicon: PersonalLexicon) -> Bool {
+        correctionPipeline.needsDictionaryChecks(for: word, language: language, personalLexicon: personalLexicon)
+    }
+
     func replacement(for word: String, language: KeyboardLanguage,
                      personalLexicon: PersonalLexicon,
                      includeProfanity: Bool = false,
                      languageModel: PersonalNGramModel = PersonalNGramModel(),
-                     previousContext: String = "") -> String? {
+                     previousContext: String = "",
+                     preparedLocal: OfflineLexicon.SpellingCheck? = nil,
+                     localWasPrepared: Bool = false) -> String? {
         let needsDictionary = correctionPipeline.needsDictionaryChecks(for: word, language: language,
                                                                        personalLexicon: personalLexicon)
-        let local = needsDictionary ? OfflineLexicon.preparedCheck(word, language: language, includeProfanity: includeProfanity) : nil
+        let local = localWasPrepared ? preparedLocal : (needsDictionary ? OfflineLexicon.preparedCheck(word, language: language, includeProfanity: includeProfanity) : nil)
         let system: (known: Bool, candidates: [String])
         if let local, local.known {
             system = (known: true, candidates: [])

@@ -48,8 +48,9 @@ final class SpacebarInteractionTests: XCTestCase {
     }
     func testHoldStartsTrackpadOnceWithoutAddingSpace() {
         var gesture = started()
-        XCTAssertEqual(gesture.hold(at: 0.3), .none)
-        XCTAssertEqual(gesture.hold(at: 0.43), .cursorBegan)
+        XCTAssertEqual(gesture.hold(at: 0.24), .none)
+        XCTAssertEqual(SpacebarInteraction.holdDuration, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(gesture.hold(at: 0.25), .cursorBegan)
         XCTAssertEqual(gesture.hold(at: 0.6), .none)
         XCTAssertEqual(gesture.end(x: 100, y: 20, at: 0.7), .none)
     }

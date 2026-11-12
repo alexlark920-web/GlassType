@@ -19,6 +19,12 @@ final class InterfaceAndFieldPolicyTests: XCTestCase {
     func testAutomationOnlyRunsInOrdinaryNonSecureFields() {
         XCTAssertTrue(TextAutomationPolicy.allowsCorrection(in: .standard, isSecure: false))
         XCTAssertFalse(TextAutomationPolicy.allowsCorrection(in: .standard, isSecure: true))
+        XCTAssertFalse(TextAutomationPolicy.allowsCorrection(in: .standard, isSecure: false, textContentType: "password"))
+        XCTAssertFalse(TextAutomationPolicy.allowsCorrection(in: .standard, isSecure: false, textContentType: "newPassword"))
+        XCTAssertTrue(TextAutomationPolicy.allowsCorrection(in: .standard, isSecure: false, textContentType: "username"))
+        XCTAssertTrue(TextAutomationPolicy.suppressesTypingAssistance(isSecureTextEntry: true, textContentType: nil))
+        XCTAssertTrue(TextAutomationPolicy.suppressesTypingAssistance(isSecureTextEntry: false, textContentType: "password"))
+        XCTAssertFalse(TextAutomationPolicy.suppressesTypingAssistance(isSecureTextEntry: false, textContentType: nil))
         for kind in KeyboardInputFieldKind.allCases where kind != .standard {
             XCTAssertFalse(TextAutomationPolicy.allowsCorrection(in: kind, isSecure: false), "\(kind)")
         }

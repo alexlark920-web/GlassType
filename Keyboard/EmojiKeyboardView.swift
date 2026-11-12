@@ -237,7 +237,9 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: EmojiItemCell.reuseIdentifier, for: indexPath) as! EmojiItemCell
+        guard let cell = collectionView.dequeueReusableCell(withReuseIdentifier: EmojiItemCell.reuseIdentifier, for: indexPath) as? EmojiItemCell else {
+            return UICollectionViewCell()
+        }
         let item = visibleItems[indexPath.item]
         cell.onLongPress = { [weak self, weak cell] in
             guard let self, let cell else { return }
@@ -320,13 +322,16 @@ final class EmojiKeyboardView: UIView, UICollectionViewDataSource, UICollectionV
 
     private func handshakeConfiguration(item: EmojiItem) -> UIContextMenuConfiguration {
         let tones: [(String, UInt32)] = [("Default", 0), ("🏻", 0x1F3FB), ("🏼", 0x1F3FC), ("🏽", 0x1F3FD), ("🏾", 0x1F3FE), ("🏿", 0x1F3FF)]
+        func scalar(_ value: UInt32) -> UnicodeScalar {
+            UnicodeScalar(value) ?? UnicodeScalar(UInt8(0x3F))
+        }
         func sequence(_ left: UInt32, _ right: UInt32) -> String {
             var scalars = String.UnicodeScalarView()
-            scalars.append(UnicodeScalar(0x1FAF1)!)
-            if left != 0 { scalars.append(UnicodeScalar(left)!) }
-            scalars.append(UnicodeScalar(0x200D)!)
-            scalars.append(UnicodeScalar(0x1FAF2)!)
-            if right != 0 { scalars.append(UnicodeScalar(right)!) }
+            scalars.append(scalar(0x1FAF1))
+            if left != 0 { scalars.append(scalar(left)) }
+            scalars.append(scalar(0x200D))
+            scalars.append(scalar(0x1FAF2))
+            if right != 0 { scalars.append(scalar(right)) }
             return String(scalars)
         }
         func toneMenu(_ title: String, choosingLeft: Bool) -> UIMenu {

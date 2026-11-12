@@ -39,8 +39,8 @@ public struct TextTouchSession {
         let slop = min(5, max(2.5, model.geometry.pitch.width * 0.12))
         if current == initialKey && maximumTravel < slop { return current }
         let previousProbability: Double
-        if result.second?.keyIndex == current { previousProbability = result.second!.probability }
-        else if result.third?.keyIndex == current { previousProbability = result.third!.probability }
+        if let second = result.second, second.keyIndex == current { previousProbability = second.probability }
+        else if let third = result.third, third.keyIndex == current { previousProbability = third.probability }
         else { previousProbability = 0 }
         // Hysteresis suppresses boundary flicker, while a deliberate slide can
         // retarget freely. This is a tunable engineering threshold, not a learned LM.

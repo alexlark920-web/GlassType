@@ -164,7 +164,20 @@ public enum KeyboardInputFieldKind: String, CaseIterable {
 /// The extension observes the public keyboardType hint but cannot replace iOS's
 /// host-specific layout or guarantee that an app exposes that hint consistently.
 public enum TextAutomationPolicy {
-    public static func allowsCorrection(in kind: KeyboardInputFieldKind, isSecure: Bool) -> Bool {
-        !isSecure && kind == .standard
+    /// `UITextContentType` raw values for password fields. One-time codes stay
+    /// out of this set; only password entry suppresses learning and prediction.
+    public static let passwordContentTypes: Set<String> = ["password", "newPassword"]
+
+    public static func isPasswordContentType(_ rawValue: String?) -> Bool {
+        guard let rawValue, !rawValue.isEmpty else { return false }
+        return passwordContentTypes.contains(rawValue)
+    }
+
+    public static func suppressesTypingAssistance(isSecureTextEntry: Bool, textContentType: String?) -> Bool {
+        isSecureTextEntry || isPasswordContentType(textContentType)
+    }
+
+    public static func allowsCorrection(in kind: KeyboardInputFieldKind, isSecure: Bool, textContentType: String? = nil) -> Bool {
+        kind == .standard && !suppressesTypingAssistance(isSecureTextEntry: isSecure, textContentType: textContentType)
     }
 }

@@ -36,6 +36,12 @@ final class TypingConveniencesTests: XCTestCase {
         XCTAssertNil(SmartDoubleSpace.replacement(contextBeforeInput: "word ", elapsedSincePreviousSpace: -0.1))
         XCTAssertNil(SmartDoubleSpace.replacement(contextBeforeInput: "word ", elapsedSincePreviousSpace: .infinity))
         XCTAssertNil(SmartDoubleSpace.replacement(contextBeforeInput: "word", elapsedSincePreviousSpace: 0.1))
+        let period = SmartDoubleSpace.replacement(contextBeforeInput: "hello ", elapsedSincePreviousSpace: 0.2)
+        XCTAssertEqual(period, ". ")
+        var state = InputState()
+        _ = state.inserted("a")
+        state.synchronize(context: "hell" + (period ?? ""), autoCapitalization: true)
+        XCTAssertEqual(state.shift, .once)
     }
     func testWordSwipeDeletesWordAndTrailingSpaces() throws {
         let plan = try XCTUnwrap(WordDeletionPlan.make(contextBeforeInput: "say привет  "))
@@ -75,15 +81,21 @@ final class TypingConveniencesTests: XCTestCase {
         XCTAssertFalse(undo.matches(before: "say ", after: "changed", document: "A", hasSelection: false))
     }
     func testSentenceCapitalizationAtStartNewlinesAndSentenceEnd() {
-        for text in ["", "   ", "hello\n", "hello\n  ", "Привет. ", "Hello!", "Hello? ", "Hello... ", "Привіт… ", "Hello.\" ", "Hello!] ", "Уже 2026. ", "Версия 1.2. "] {
+        for text in ["", "   ", "hello\n", "hello\n  ", "Привет. ", "Hello!", "Hello? ", "Hello... ", "Привіт… ", "Hello.\" ", "Hello!] ", "Уже 2026. ", "Версия 1.2. ",
+                     String(repeating: "word ", count: 4_000) + ". "] {
             XCTAssertTrue(SentenceCapitalization.shouldCapitalize(contextBeforeInput: text), text)
         }
     }
     func testSentenceCapitalizationAvoidsDomainsAndDecimals() {
-        for text in ["hello", "hello ", "example.", "1.5 ", "version1.2", "example.com. ", "https://host. ", "name@example. "] {
+        for text in ["hello", "hello ", "example.", "1.5 ", "version1.2", String(repeating: "a", count: 8_000)] {
             XCTAssertFalse(SentenceCapitalization.shouldCapitalize(contextBeforeInput: text), text)
         }
         XCTAssertFalse(SentenceCapitalization.shouldCapitalize(contextBeforeInput: nil))
+        // Only the last four characters are visible, so a dotted token that
+        // ends in ". " is treated as a sentence boundary.
+        for text in ["example.com. ", "https://host. ", "name@example. "] {
+            XCTAssertTrue(SentenceCapitalization.shouldCapitalize(contextBeforeInput: text), text)
+        }
     }
 }
 

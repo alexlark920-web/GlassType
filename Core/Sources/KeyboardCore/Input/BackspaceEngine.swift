@@ -12,17 +12,27 @@ public struct BackspaceEngine: Sendable {
     public static let repeatInterval: TimeInterval = 0.05
     public static let acceleratedInterval: TimeInterval = 0.03
     public static let wordInterval: TimeInterval = 0.2
-    public static let wordDeletionAfter: TimeInterval = 1.6
-    public static let accelerationAfter: TimeInterval = 0.8
+    /// Characters repeat through the first 0.6s of the hold, then whole words.
+    public static let wordDeletionAfter: TimeInterval = 0.6
+    /// Character repeats speed up before the hold escalates to words.
+    public static let accelerationAfter: TimeInterval = 0.45
 
     public private(set) var synchronizedBuffer: String? = nil
 
     public init() {}
 
     /// The first character is removed on touch-down; held presses start
-    /// repeating after 300 ms.
+    /// repeating after 300 ms. Word deletion begins once the hold reaches 0.6s.
     public func nextDeletion(heldFor elapsed: TimeInterval) -> Deletion {
         elapsed.isFinite && elapsed >= Self.wordDeletionAfter ? .word : .character
+    }
+
+    /// Whole-word repeats require a live `documentContextBeforeInput`. An empty
+    /// or unavailable context stays on character deletion.
+    public func nextDeletion(heldFor elapsed: TimeInterval, contextBeforeInput: String?) -> Deletion {
+        guard nextDeletion(heldFor: elapsed) == .word else { return .character }
+        guard let contextBeforeInput, !contextBeforeInput.isEmpty, contextBeforeInput.last?.isNewline != true else { return .character }
+        return .word
     }
 
     public func nextInterval(heldFor elapsed: TimeInterval) -> TimeInterval {

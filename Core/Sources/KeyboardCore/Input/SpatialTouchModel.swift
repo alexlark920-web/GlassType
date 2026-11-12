@@ -5,6 +5,7 @@ import simd
 /// Spatial touch model evaluating Gaussian probability distributions over keyboard key centers.
 /// Operates strictly on SIMD2<Float> and primitive Floats with zero heap allocations in the hot path.
 public struct SpatialTouchModel: Sendable {
+    /// Center-key σ. The live value lives on ``KeyboardTuningConfig/baseSigma``.
     public static let defaultSigma: Float = 34.0
     public static let maximumKeyCount: Int = 64
 
@@ -57,37 +58,53 @@ public struct SpatialTouchModel: Sendable {
         }
     }
 
+    struct KeyEncoding: Sendable {
+        var bytes: (UInt8, UInt8, UInt8, UInt8)
+        var length: UInt8
+    }
+
     public let keys: [KeyLocation]
+    /// Key centers kept beside `keys` so the touch loop never copies a `KeyLocation` (and its `String`).
+    let centers: [SIMD2<Float>]
+    let encodings: [KeyEncoding]
     public let sigma: Float
     public let twoSigmaSquared: Float
     public let invTwoSigmaSquared: Float
+    /// Per-key `1 / (2 σ²)`. Outer columns use `baseSigma * edgeKeySigmaMultiplier`.
+    let invTwoSigmaSquaredPerKey: [Float]
+    let tuning: KeyboardTuningConfig
 
-    public init(keys: [KeyLocation] = [], sigma: Float = defaultSigma) {
+    public init(keys: [KeyLocation] = [], sigma: Float = KeyboardTuningConfig.current.baseSigma, tuning: KeyboardTuningConfig = .current) {
         self.keys = keys
-        let s = max(1.0, sigma)
+        self.centers = keys.map(\.center)
+        self.encodings = keys.map { KeyEncoding(bytes: $0.utf8Bytes, length: $0.utf8Length) }
+        self.tuning = tuning
+        let s = max(1.0, sigma.isFinite ? sigma : tuning.baseSigma)
         self.sigma = s
         let twoSS = 2.0 * s * s
         self.twoSigmaSquared = twoSS
         self.invTwoSigmaSquared = 1.0 / twoSS
-    }
-
-    public init(keyCenters: [String: CGPoint], sigma: Float = defaultSigma) {
-        let sortedKeys = keyCenters.keys.sorted()
-        let locations = sortedKeys.compactMap { key -> KeyLocation? in
-            guard let pt = keyCenters[key] else { return nil }
-            return KeyLocation(key: key, centerPoint: pt)
+        self.invTwoSigmaSquaredPerKey = keys.map { location in
+            let keySigma = max(1, tuning.sigma(for: location.key, base: s))
+            return 1.0 / (2.0 * keySigma * keySigma)
         }
-        self.init(keys: locations, sigma: sigma)
     }
 
-    public init(geometry: KeyboardGeometry, sigma: Float = defaultSigma) {
+    public init(keyCenters: [String: CGPoint], sigma: Float = KeyboardTuningConfig.current.baseSigma, tuning: KeyboardTuningConfig = .current) {
+        let locations = keyCenters.sorted { $0.key < $1.key }.map {
+            KeyLocation(key: $0.key, centerPoint: $0.value)
+        }
+        self.init(keys: locations, sigma: sigma, tuning: tuning)
+    }
+
+    public init(geometry: KeyboardGeometry, sigma: Float = KeyboardTuningConfig.current.baseSigma, tuning: KeyboardTuningConfig = .current) {
         var locations: [KeyLocation] = []
         for key in geometry.keys {
             if let character = key.role.character, character.allSatisfy(\.isLetter) {
                 locations.append(KeyLocation(key: character, centerPoint: key.center))
             }
         }
-        self.init(keys: locations, sigma: sigma)
+        self.init(keys: locations, sigma: sigma, tuning: tuning)
     }
 
     /// P_spatial(touch, key) = exp(- (dist(touch, key_center)^2) / (2 * sigma^2))
@@ -120,11 +137,12 @@ public struct SpatialTouchModel: Sendable {
         guard maxCount > 0 else { return 0 }
         var count = 0
 
-        for i in 0..<keys.count {
-            let keyCenter = keys[i].center
+        for i in 0..<centers.count {
+            let keyCenter = centers[i]
             let delta = touch - keyCenter
             let distSq = delta.x * delta.x + delta.y * delta.y
-            let logP = -distSq * invTwoSigmaSquared
+            let inv = i < invTwoSigmaSquaredPerKey.count ? invTwoSigmaSquaredPerKey[i] : invTwoSigmaSquared
+            let logP = -distSq * inv
             let p = exp(logP)
 
             if p >= probabilityThreshold {
@@ -151,24 +169,5 @@ public struct SpatialTouchModel: Sendable {
             }
         }
         return count
-    }
-
-    /// Convenience candidate evaluation returning high-level results.
-    public func topCandidates(for touch: CGPoint, limit: Int = 4, threshold: Float = 0.001) -> [(key: KeyLocation, probability: Float, logProbability: Float)] {
-        guard limit > 0, !keys.isEmpty else { return [] }
-        let touchSIMD = SIMD2<Float>(Float(touch.x), Float(touch.y))
-        var raw = [ScoredKey](repeating: ScoredKey(), count: min(limit, keys.count))
-        let placed = raw.withUnsafeMutableBufferPointer { buffer in
-            evaluate(touch: touchSIMD, into: buffer, probabilityThreshold: threshold)
-        }
-        var result: [(key: KeyLocation, probability: Float, logProbability: Float)] = []
-        result.reserveCapacity(placed)
-        for i in 0..<placed {
-            let idx = Int(raw[i].keyIndex)
-            if keys.indices.contains(idx) {
-                result.append((key: keys[idx], probability: raw[i].probability, logProbability: raw[i].logProbability))
-            }
-        }
-        return result
     }
 }

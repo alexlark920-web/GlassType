@@ -13,11 +13,12 @@ public enum OfflineLexicon {
 
         let language: KeyboardLanguage
         let trie: MappedBinaryLexicon?
-        let orderedWordData: Data?
+        let orderedWords: StableMappedBytes?
         private let rankLock = NSLock()
         private var rankCache: [String: Int] = [:]
         private let rankIndexLock = NSLock()
         private var rankIndex: [RankEntry]?
+        private var cachedLineCount: Int?
 
         init(language: KeyboardLanguage) {
             self.language = language
@@ -28,43 +29,20 @@ public enum OfflineLexicon {
                 trie = nil
             }
             if let url = Bundle.module.url(forResource: name, withExtension: "txt") {
-                orderedWordData = try? Data(contentsOf: url, options: .mappedIfSafe)
+                orderedWords = try? StableMappedBytes(url: url)
             } else {
-                orderedWordData = nil
+                orderedWords = nil
             }
         }
 
         func words() -> [String] {
-            let bundled = orderedWordData.map {
-                String(decoding: $0, as: UTF8.self).split(whereSeparator: { $0.isNewline })
-                    .prefix(51_000).map { String($0.split(separator: "\t", maxSplits: 1).first ?? $0) }
-            } ?? []
-            var seen = Set(bundled)
-            return bundled + SupplementalVocabulary.words(for: language).filter { seen.insert($0).inserted }
+            words(isCancelled: { false }) ?? []
         }
 
         func words(isCancelled: @Sendable () -> Bool) -> [String]? {
             var bundled: [String] = []
-            if let orderedWordData {
-                guard let parsed = orderedWordData.withUnsafeBytes({ raw -> [String]? in
-                    guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return [] }
-                    var result: [String] = []
-                    var start = 0
-                    var line = 0
-                    for end in 0...raw.count {
-                        guard end == raw.count || bytes[end] == 10 else { continue }
-                        if line.isMultiple(of: 128), isCancelled() { return nil }
-                        var wordEnd = end
-                        if wordEnd > start, bytes[wordEnd - 1] == 13 { wordEnd -= 1 }
-                        if let tab = (start..<wordEnd).first(where: { bytes[$0] == 9 }) { wordEnd = tab }
-                        if wordEnd > start, result.count < 51_000 {
-                            result.append(String(decoding: UnsafeBufferPointer(start: bytes + start, count: wordEnd - start), as: UTF8.self))
-                        }
-                        start = end + 1
-                        line += 1
-                    }
-                    return result
-                }) else { return nil }
+            if let orderedWords {
+                guard let parsed = Self.collectWords(in: orderedWords, limit: 51_000, isCancelled: isCancelled) else { return nil }
                 bundled = parsed
             }
             var result = bundled
@@ -81,40 +59,82 @@ public enum OfflineLexicon {
         /// for every streaming frame. Offsets let us verify hash collisions without
         /// storing every word as a separate String.
         private func preparedRankIndex() -> [RankEntry]? {
-            guard let orderedWordData else { return nil }
+            guard let orderedWords else { return nil }
             rankIndexLock.lock()
             defer { rankIndexLock.unlock() }
             if let rankIndex { return rankIndex }
 
-            let entries = orderedWordData.withUnsafeBytes { raw -> [RankEntry] in
-                guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return [] }
-                var result: [RankEntry] = []
-                result.reserveCapacity(80_000)
-                var start = 0
-                var rank = 0
-                for end in 0...raw.count {
-                    guard end == raw.count || bytes[end] == 10 else { continue }
-                    var wordEnd = end
-                    if wordEnd > start, bytes[wordEnd - 1] == 13 { wordEnd -= 1 }
-                    if let tab = (start..<wordEnd).first(where: { bytes[$0] == 9 }) { wordEnd = tab }
-                    if wordEnd > start {
-                        let view = UnsafeBufferPointer(start: bytes + start, count: wordEnd - start)
-                        result.append(RankEntry(hash: Self.hash(view), rank: rank, offset: start, length: wordEnd - start))
-                        rank += 1
-                    }
-                    start = end + 1
+            let bytes = orderedWords.base
+            let rawCount = orderedWords.count
+            var result: [RankEntry] = []
+            result.reserveCapacity(80_000)
+            var start = 0
+            var rank = 0
+            for end in 0...rawCount {
+                guard end == rawCount || bytes[end] == 10 else { continue }
+                var wordEnd = end
+                if wordEnd > start, bytes[wordEnd - 1] == 13 { wordEnd -= 1 }
+                if let tab = (start..<wordEnd).first(where: { bytes[$0] == 9 }) { wordEnd = tab }
+                if wordEnd > start {
+                    let view = UnsafeBufferPointer(start: bytes + start, count: wordEnd - start)
+                    result.append(RankEntry(hash: Self.hash(view), rank: rank, offset: start, length: wordEnd - start))
+                    rank += 1
                 }
-                result.sort { $0.hash < $1.hash }
-                return result
+                start = end + 1
             }
-            rankIndex = entries
-            return entries
+            result.sort { $0.hash < $1.hash }
+            var newlines = 0
+            for index in 0..<rawCount where bytes[index] == 10 { newlines += 1 }
+            if rawCount > 0, bytes[rawCount - 1] != 10 { newlines += 1 }
+            cachedLineCount = newlines
+            rankIndex = result
+            return result
+        }
+
+        func warmRankIndex() {
+            _ = preparedRankIndex()
+        }
+
+        /// Rank one UTF-8 word against the mapped dictionary. Does not copy the
+        /// query or the mapped bytes into a `String`, `Array`, or `Dictionary`.
+        func rank(utf8 query: UnsafeBufferPointer<UInt8>) -> Int? {
+            guard !query.isEmpty, let index = preparedRankIndex() else { return nil }
+            let hash = Self.hash(query)
+            var low = 0
+            var high = index.count
+            while low < high {
+                let mid = low + (high - low) / 2
+                if index[mid].hash < hash { low = mid + 1 } else { high = mid }
+            }
+            if let orderedWords {
+                let source = orderedWords.base
+                var cursor = low
+                while cursor < index.count, index[cursor].hash == hash {
+                    let entry = index[cursor]
+                    if entry.length == query.count,
+                       UnsafeBufferPointer(start: source + entry.offset, count: entry.length).elementsEqual(query) {
+                        return entry.rank
+                    }
+                    cursor += 1
+                }
+            }
+            let base = cachedLineCount ?? 0
+            for (offset, word) in SupplementalVocabulary.words(for: language).enumerated() {
+                var index = 0
+                var matches = true
+                for byte in word.utf8 {
+                    if index >= query.count || query[index] != byte { matches = false; break }
+                    index += 1
+                }
+                if matches, index == query.count { return base + offset }
+            }
+            return nil
         }
 
         /// Rank the small candidate set. The one-time index is shared across calls;
         /// the cache avoids even binary searches for recently seen beam candidates.
         func ranks(for words: [String]) -> [String: Int] {
-            guard orderedWordData != nil, !words.isEmpty,
+            guard let orderedWords, !words.isEmpty,
                   let index = preparedRankIndex() else { return [:] }
 
             let normalizedWords = words.map(OfflineLexicon.normalized)
@@ -127,11 +147,12 @@ public enum OfflineLexicon {
 
             let missing = Set(normalizedWords.filter { result[$0] == nil })
             if !missing.isEmpty {
-                orderedWordData!.withUnsafeBytes { raw in
-                    guard let source = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-                    for word in missing {
-                        let query = Array(word.utf8)
-                        let hash = query.withUnsafeBufferPointer { Self.hash($0) }
+                let source = orderedWords.base
+                for word in missing {
+                    var searched = false
+                    word.utf8.withContiguousStorageIfAvailable { query in
+                        searched = true
+                        let hash = Self.hash(query)
                         var low = 0
                         var high = index.count
                         while low < high {
@@ -142,20 +163,39 @@ public enum OfflineLexicon {
                         while cursor < index.count, index[cursor].hash == hash {
                             let entry = index[cursor]
                             if entry.length == query.count,
-                               query.withUnsafeBufferPointer({ queryBuffer in
-                                   UnsafeBufferPointer(start: source + entry.offset, count: entry.length).elementsEqual(queryBuffer)
-                               }) {
+                               UnsafeBufferPointer(start: source + entry.offset, count: entry.length).elementsEqual(query) {
                                 result[word] = entry.rank
                                 break
                             }
                             cursor += 1
                         }
                     }
+                    if searched { continue }
+                    let query = Array(word.utf8)
+                    let hash = query.withUnsafeBufferPointer { Self.hash($0) }
+                    var low = 0
+                    var high = index.count
+                    while low < high {
+                        let mid = low + (high - low) / 2
+                        if index[mid].hash < hash { low = mid + 1 } else { high = mid }
+                    }
+                    var cursor = low
+                    while cursor < index.count, index[cursor].hash == hash {
+                        let entry = index[cursor]
+                        if entry.length == query.count,
+                           query.withUnsafeBufferPointer({ queryBuffer in
+                               UnsafeBufferPointer(start: source + entry.offset, count: entry.length).elementsEqual(queryBuffer)
+                           }) {
+                            result[word] = entry.rank
+                            break
+                        }
+                        cursor += 1
+                    }
                 }
             }
 
             let extras = SupplementalVocabulary.words(for: language)
-            let baseRank = orderedWordData!.splitLinesCount
+            let baseRank = cachedLineCount ?? Self.lineCount(orderedWords)
             for (offset, word) in extras.enumerated() {
                 let key = OfflineLexicon.normalized(word)
                 if result[key] == nil { result[key] = baseRank + offset }
@@ -180,25 +220,31 @@ public enum OfflineLexicon {
                 if result.count >= limit { return Array(result.prefix(limit)) }
             }
             guard trie.findWords(matchingPrefix: key, limit: 1).isEmpty == false else { return result }
-            guard let orderedWordData else {
+            guard let orderedWords else {
                 let mapped = trie.findWords(matchingPrefix: key, limit: limit + 1)
                 return (result + mapped.filter { OfflineLexicon.normalized($0) != key }).prefix(limit).map { $0 }
             }
-            let prefixBytes = Array(key.utf8)
+            let bytes = orderedWords.base
+            let rawCount = orderedWords.count
             var foundRanks: [String: Int] = [:]
-            orderedWordData.withUnsafeBytes { raw in
-                guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            let prefixCount = key.utf8.count
+            withUnsafeTemporaryAllocation(of: UInt8.self, capacity: max(1, prefixCount)) { prefixStorage in
+                guard let prefixBase = prefixStorage.baseAddress else { return }
+                var prefixLength = 0
+                for byte in key.utf8 {
+                    prefixBase[prefixLength] = byte
+                    prefixLength += 1
+                }
+                let prefixBytes = UnsafeBufferPointer(start: prefixBase, count: prefixLength)
                 var start = 0
                 var rank = 0
-                for end in 0...raw.count {
-                    guard end == raw.count || bytes[end] == 10 else { continue }
+                for end in 0...rawCount {
+                    guard end == rawCount || bytes[end] == 10 else { continue }
                     var wordEnd = end
                     if wordEnd > start, bytes[wordEnd - 1] == 13 { wordEnd -= 1 }
                     if let tab = (start..<wordEnd).first(where: { bytes[$0] == 9 }) { wordEnd = tab }
                     if wordEnd - start >= prefixBytes.count,
-                       prefixBytes.withUnsafeBufferPointer({ buffer in
-                           UnsafeBufferPointer(start: bytes + start, count: buffer.count).starts(with: buffer)
-                       }) {
+                       UnsafeBufferPointer(start: bytes + start, count: prefixBytes.count).starts(with: prefixBytes) {
                         let word = String(decoding: UnsafeBufferPointer(start: bytes + start, count: wordEnd - start), as: UTF8.self)
                         if OfflineLexicon.normalized(word) != key,
                            (includeProfanity || !SupplementalVocabulary.isProfanity(word, language: language)),
@@ -218,6 +264,33 @@ public enum OfflineLexicon {
             rankCache.merge(foundRanks) { old, _ in old }
             rankLock.unlock()
             return Array(result.prefix(limit))
+        }
+
+        private static func collectWords(in mapped: StableMappedBytes, limit: Int, isCancelled: @Sendable () -> Bool) -> [String]? {
+            let bytes = mapped.base
+            var result: [String] = []
+            var start = 0
+            var line = 0
+            for end in 0...mapped.count {
+                guard end == mapped.count || bytes[end] == 10 else { continue }
+                if line.isMultiple(of: 128), isCancelled() { return nil }
+                var wordEnd = end
+                if wordEnd > start, bytes[wordEnd - 1] == 13 { wordEnd -= 1 }
+                if let tab = (start..<wordEnd).first(where: { bytes[$0] == 9 }) { wordEnd = tab }
+                if wordEnd > start, result.count < limit {
+                    result.append(String(decoding: UnsafeBufferPointer(start: bytes + start, count: wordEnd - start), as: UTF8.self))
+                }
+                start = end + 1
+                line += 1
+            }
+            return result
+        }
+
+        private static func lineCount(_ mapped: StableMappedBytes) -> Int {
+            let bytes = mapped.base
+            var lines = 0
+            for index in 0..<mapped.count where bytes[index] == 10 { lines += 1 }
+            return lines + (mapped.count > 0 && bytes[mapped.count - 1] != 10 ? 1 : 0)
         }
 
         private static func hash(_ bytes: [UInt8]) -> UInt64 {
@@ -326,6 +399,16 @@ public enum OfflineLexicon {
     public static func frequencyIndex(word: String, language: KeyboardLanguage) -> Int? {
         frequencyIndices(words: [word], language: language)[normalized(word)]
     }
+
+    /// Builds the mapped rank index off the touch path so the first frame does not scan the file.
+    static func prepareFrequencyIndex(language: KeyboardLanguage) {
+        data(for: language).warmRankIndex()
+    }
+
+    /// Scalar rank for a beam word already held as UTF-8. No intermediate `String`.
+    static func frequencyRank(utf8: UnsafeBufferPointer<UInt8>, language: KeyboardLanguage) -> Int? {
+        data(for: language).rank(utf8: utf8)
+    }
     public static func frequencyIndices(words: [String], language: KeyboardLanguage) -> [String: Int] {
         data(for: language).ranks(for: words)
     }
@@ -392,16 +475,5 @@ public enum OfflineLexicon {
             .replacingOccurrences(of: "ʼ", with: "'")
             .replacingOccurrences(of: "‘", with: "'")
             .replacingOccurrences(of: "‑", with: "-")
-    }
-}
-
-private extension Data {
-    var splitLinesCount: Int {
-        withUnsafeBytes { raw in
-            guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 0 }
-            var lines = 0
-            for index in 0..<raw.count where bytes[index] == 10 { lines += 1 }
-            return lines + (raw.count > 0 && bytes[raw.count - 1] != 10 ? 1 : 0)
-        }
     }
 }

@@ -1,1 +1,53 @@
+# GlassType iOS Keyboard Extension
 
+Strict architecture for the keyboard extension. Follow every rule below.
+
+## Tech stack
+
+- Swift 6 with `-strict-concurrency=complete`.
+- Shared logic lives in the SPM package `Core/KeyboardCore`.
+- UIKit lives under `Keyboard/`.
+- Zero third-party dependencies. Do not add packages, CocoaPods, or Carthage.
+
+## Memory limit (48MB jetsam ceiling)
+
+Never copy `MappedBinaryLexicon` mmap bytes into heap arrays or dictionaries. Read through the mapping.
+
+Inside hot touch loops (`touchesMoved`) and trie traversals, forbid heap allocations. No intermediate `String`, `Array`, `Dictionary`, or class allocations.
+
+Use `SIMD2<Float>`, primitive scalars, and `UnsafeRawBufferPointer` slices.
+
+```swift
+// Bad: copies mmap bytes and allocates in the touch path
+let bytes = Array(lexicon.mappedBytes)
+var path = [CGPoint]()
+
+// Good: slice the mapping; keep the gesture as scalars
+let slice = UnsafeRawBufferPointer(start: lexicon.base, count: lexicon.count)
+let point = SIMD2<Float>(Float(touch.x), Float(touch.y))
+```
+
+## 120Hz ProMotion budget (<= 8ms)
+
+Never run spatial math, beam search, or lexicon lookups on `@MainActor`. Isolate heavy compute in background actors. The main actor only applies the result.
+
+## Swift 6 concurrency
+
+UI and `textDocumentProxy` operations stay strictly on `@MainActor`.
+
+Every async trie or frame loop checks `Task.isCancelled` at each step and returns immediately so stale touch frames are dropped.
+
+```swift
+for node in traversal {
+    if Task.isCancelled { return }
+    // score node with scalars / buffer slices only
+}
+```
+
+## UI rendering
+
+Use lightweight `CALayer` hierarchies for the key grid and popups. Do not build those surfaces as deep Auto Layout constraint trees.
+
+## Verification
+
+After any change under `Core/KeyboardCore`, run `swift test` and confirm zero regressions and concurrency safety. On Windows, run it through WSL.
