@@ -116,7 +116,12 @@ final class KeyboardTouchSurface: UIView {
         if previousBounds != bounds { layoutIfNeeded() }
         guard let index = keyIndex(at: point), keyViews.indices.contains(index) else { return nil }
         let button = keyViews[index]
-        return button.isEnabled && button.isUserInteractionEnabled && !button.isHidden ? button : nil
+        guard button.isEnabled, button.isUserInteractionEnabled, !button.isHidden else { return nil }
+        let buttonPoint = button.convert(point, from: self)
+        if let descendant = button.hitTest(buttonPoint, with: event), descendant !== button {
+            return descendant
+        }
+        return button
     }
     struct LearningSample {
         let point: CGPoint

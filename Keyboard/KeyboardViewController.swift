@@ -786,6 +786,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         }, for: .touchUpInside)
         let settingsPress = UILongPressGestureRecognizer(target: self, action: #selector(settingsHeld(_:)))
         settingsPress.minimumPressDuration = settings.holdDelay
+        settingsPress.allowableMovement = 24
         settingsPress.delaysTouchesBegan = false; settingsPress.delaysTouchesEnded = false
         language.addGestureRecognizer(settingsPress)
         language.accessibilityCustomActions = [
@@ -798,7 +799,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         gearHint.accessibilityLabel = localized("Настройки приложения")
         gearHint.accessibilityHint = localized("Открыть настройки в приложении GlassType")
         gearHint.translatesAutoresizingMaskIntoConstraints = false
-        gearHint.addAction(UIAction { [weak self] _ in self?.openAppSettings() }, for: .touchUpInside)
+        gearHint.addAction(UIAction { [weak self] _ in self?.performFeedback() }, for: .touchDown)
+        gearHint.addAction(UIAction { [weak self] _ in
+            self?.openAppSettings()
+        }, for: .touchUpInside)
         language.addSubview(gearHint)
         NSLayoutConstraint.activate([
             gearHint.widthAnchor.constraint(equalToConstant: 24), gearHint.heightAnchor.constraint(equalToConstant: 24),
