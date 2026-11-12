@@ -108,15 +108,9 @@ final class StreamingBeamSearchTests: XCTestCase {
         let actor = GlideDecoderActor()
         try await actor.configure(keyCenters: geometry, language: .english, beamWidth: 16)
 
-        let points = [
-            CGPoint(x: 50, y: 50),
-            CGPoint(x: 55, y: 52),
-            CGPoint(x: 60, y: 55),
-            CGPoint(x: 70, y: 60),
-            CGPoint(x: 85, y: 70),
-            CGPoint(x: 90, y: 75),
-            CGPoint(x: 95, y: 80)
-        ]
+        let points = try ["h", "e", "l", "l", "o"].map { letter in
+            try XCTUnwrap(geometry[letter], "Missing key center for \(letter)")
+        }
 
         var candidates: [Candidate] = []
         for (index, point) in points.enumerated() {
