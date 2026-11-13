@@ -96,7 +96,9 @@ public struct KeyboardTuningConfig: Sendable, Equatable {
         return isEdgeColumn(key) ? resolved * edgeKeySigmaMultiplier : resolved
     }
 
-    private static var defaultDiagnosticsEnabled: Bool {
+    /// Default for ``diagnosticsEnabled``: on in debug builds, off in release.
+    /// Public so the initializer's default argument can reference it.
+    public static var defaultDiagnosticsEnabled: Bool {
         #if DEBUG
         return true
         #else
